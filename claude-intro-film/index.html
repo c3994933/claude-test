@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>我，Claude · I, Claude</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Cinzel:wght@400;600&family=Ma+Shan+Zheng&display=block" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  canvas{position:absolute;inset:0;margin:auto;max-width:100vw;max-height:100vh;aspect-ratio:16/9;width:100vw}
+  #ui{position:fixed;left:0;right:0;bottom:0;padding:10px 16px;display:flex;gap:12px;align-items:center;color:#d9c8ad;font:13px sans-serif;opacity:0;transition:opacity .3s}
+  body:hover #ui{opacity:1}
+  #ui input{flex:1}
+  #ui button{background:none;border:1px solid #806a50;color:#d9c8ad;padding:4px 12px;cursor:pointer}
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<div id="ui"><button id="play">▶ 播放</button><input id="seek" type="range" min="0" max="1000" value="0"><span id="time">0:00</span></div>
+<audio id="audio" src="score.wav" preload="auto"></audio>
+<script src="core.js"></script>
+<script src="gl.js"></script>
+<script src="scenesA.js"></script>
+<script src="scenesB.js"></script>
+<script src="main.js"></script>
+<script>
+(async () => {
+  const q = new URLSearchParams(location.search);
+  await FILM.setup();
+  window.READY = true;
+  if (q.has('render')) return;            // driven frame-by-frame by render.mjs
+  const audio = document.getElementById('audio'), play = document.getElementById('play'), seek = document.getElementById('seek'), time = document.getElementById('time');
+  let T = +(q.get('t') || 0), playing = false, last = 0;
+  const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  play.onclick = () => { playing = !playing; play.textContent = playing ? '❚❚ 暂停' : '▶ 播放'; if (playing) { audio.currentTime = T; audio.play().catch(() => {}); } else audio.pause(); };
+  seek.oninput = () => { T = seek.value / 1000 * FILM.TOTAL(); audio.currentTime = T; };
+  function loop(now) {
+    if (playing) { T = audio.readyState > 2 && !audio.paused ? audio.currentTime : T + (now - last) / 1000; if (T > FILM.TOTAL()) { playing = false; T = 0; } }
+    last = now; FILM.renderAt(T); seek.value = T / FILM.TOTAL() * 1000; time.textContent = `${fmt(T)} / ${fmt(FILM.TOTAL())}`;
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
