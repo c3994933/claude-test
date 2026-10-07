@@ -1,5 +1,6 @@
 node_modules
 out/build/
+out/*.wav
 out/stills/
 plates/*.png
 __pycache__/
