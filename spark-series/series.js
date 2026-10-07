@@ -293,4 +293,6 @@ async function setup() {
   const used = new Set(SHOTS.filter(s => s.sc).map(s => REG[s.sc][0]()));
   for (const o of used) if (o.init) await o.init();
 }
-window.FILM = { setup, renderAt, TOTAL: () => TOTAL, FPS, timeline: () => ({ bpm: BPM, shots: SHOTS.map(s => ({ sc: s.sc || 'warp', start: s.start, dur: s.dur, tr: s.tr })) }) };
+window.FILM = { setup, renderAt, TOTAL: () => TOTAL, FPS, timeline: () => ({ bpm: BPM,
+  shots: SHOTS.map(s => ({ sc: s.sc || 'warp', start: s.start, dur: s.dur, tr: s.tr, title: s.title || s.card || null, card: !!s.card })),
+  chapters: CHAPS.map(c => ({ key: c.key, start: c.start, end: c.end, lines: c.lines.map(l => ({ cn: l.cn, at: c.start + l.at, out: c.start + l.out })) })) }) };

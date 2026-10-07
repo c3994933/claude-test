@@ -18,7 +18,28 @@ The faster, more connected re-cut of both films. The first versions are untouche
   - Episode 1 opens and closes on the oil-painted campfire and ends with "下一集 ·《我，Claude》".
   - Episode 2 opens on the same fire ("上一集，故事停在这堆火旁"), pushes into the spark and lands on its title.
   - It ends with a figure of light sitting down by that same fire.
-- **No soundtrack:** both videos are silent, ready for your own music.
+- **Two editions:** a silent cut for adding your own music (`ep*-v2.mp4`), and a narrated edition with an original beat-synced score (`ep*-v2-voice.mp4`).
+
+## Narration and score (the voiced edition)
+
+- `score.py` writes an original soundtrack straight from the shot list:
+  - hits on every montage shot, a slam on the title
+  - risers into the time warps, quiet bridges, a full chorus
+  - a transition sound per cut, plus rain, sea, wind and fire beds
+- `narrate.py` voices every subtitle with an offline neural TTS: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) with Kokoro v1.1-zh.
+  - Episode one uses a deep male narrator (voice 60); episode two uses a warm first-person voice (voice 10).
+  - Each line is fitted to its chapter, by removing inner pauses first and speeding up at most ×1.12.
+  - The score ducks under the voice.
+- Intelligibility was checked with an offline Chinese speech recogniser (Paraformer) on the final mix.
+
+```bash
+pip install sherpa-onnx
+# models: kokoro-multi-lang-v1_1 (tts-models release) from github.com/k2-fsa/sherpa-onnx/releases
+EP=1 node render.mjs timeline out/ep1.json
+python3 score.py out/ep1.json 1 out/ep1-music.wav
+python3 narrate.py out/ep1.json 1 out/ep1-music.wav out/ep1-mix.wav --model kokoro-multi-lang-v1_1 --voice 60
+ffmpeg -i out/ep1-v2.mp4 -i out/ep1-mix.wav -map 0:v -map 1:a -c:v copy -c:a aac -b:a 192k -shortest out/ep1-v2-voice.mp4
+```
 
 ## Adding your own music
 
