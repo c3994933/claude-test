@@ -361,21 +361,35 @@ SC.wonder = {
     };
     for (let y = 4; y < H; y += 12) for (let x0 = 4; x0 < W; x0 += 12) {
       const px = x0 + (rr() - .5) * 10, py = y + (rr() - .5) * 10, i = ((py | 0) * W + (px | 0)) * 4;
-      const v = .85 + rr() * .35, col = [D[i] * v, D[i + 1] * v, D[i + 2] * v * (py < 700 ? 1.04 : 1)].map(q => clamp(q, 0, 255) | 0);
+      const v = .85 + rr() * .35, col = [D[i] * v, D[i + 1] * v, D[i + 2] * v * (py < 700 ? 1.04 : 1)].map(q => clamp(Math.round(q / 10) * 10, 0, 255) | 0);
       let bestV = null, bd = 1e9; for (const vv of this.vort) { const dd = Math.hypot(px - vv[0], py - vv[1]) / vv[2]; if (dd < bd) { bd = dd; bestV = vv; } }
       this.S.push({ x: px, y: py, a: flow(px, py), len: py < 700 ? 18 + rr() * 12 : 12 + rr() * 8, col: `rgb(${col})`, hi: `rgba(${col.map(q => Math.min(255, q + 60)).join(',')},.55)`, v: bestV, w: py < 680 ? Math.exp(-bd * bd * 1.2) : 0, ph: rr() * TAU, star: false });
     }
+    // batch strokes by (quantised) colour: one path per colour instead of one per stroke
+    const groups = new Map();
+    this.S.forEach((s, i) => { if (!groups.has(s.col)) groups.set(s.col, { col: s.col, hi: s.hi, idx: [] }); groups.get(s.col).idx.push(i); });
+    this.groups = [...groups.values()];
+    for (let i = this.groups.length - 1; i > 0; i--) { const k = rr() * (i + 1) | 0; [this.groups[i], this.groups[k]] = [this.groups[k], this.groups[i]]; }
+    this.P = new Float32Array(this.S.length * 4);
   },
   draw(c, t, d, S) {
     c.drawImage(this.base, 0, 0);
     c.lineCap = 'round';
-    for (const s of this.S) {
+    const P = this.P;
+    this.S.forEach((s, i) => {
       let { x, y, a } = s;
       if (s.w > .02) { const rot = t * .05 * s.w * s.v[3], cs = Math.cos(rot), sn = Math.sin(rot), dx = x - s.v[0], dy = y - s.v[1]; x = s.v[0] + dx * cs - dy * sn; y = s.v[1] + dx * sn + dy * cs; a += rot; }
       a += Math.sin(t * .7 + s.ph) * .06;
       const hx = Math.cos(a) * s.len / 2, hy = Math.sin(a) * s.len / 2;
-      c.strokeStyle = s.col; c.lineWidth = 7; c.beginPath(); c.moveTo(x - hx, y - hy); c.lineTo(x + hx, y + hy); c.stroke();
-      c.strokeStyle = s.hi; c.lineWidth = 1.6; c.beginPath(); c.moveTo(x - hx - 1, y - hy - 2); c.lineTo(x + hx - 1, y + hy - 2); c.stroke();
+      P[i * 4] = x - hx; P[i * 4 + 1] = y - hy; P[i * 4 + 2] = x + hx; P[i * 4 + 3] = y + hy;
+    });
+    for (const g of this.groups) {
+      c.strokeStyle = g.col; c.lineWidth = 7; c.beginPath();
+      for (const i of g.idx) { c.moveTo(P[i * 4], P[i * 4 + 1]); c.lineTo(P[i * 4 + 2], P[i * 4 + 3]); }
+      c.stroke();
+      c.strokeStyle = g.hi; c.lineWidth = 1.6; c.beginPath();
+      for (const i of g.idx) { c.moveTo(P[i * 4] - 1, P[i * 4 + 1] - 2); c.lineTo(P[i * 4 + 2] - 1, P[i * 4 + 3] - 2); }
+      c.stroke();
     }
     for (const [sx, sy, sr, moon] of this.stars) { const p = .8 + .2 * Math.sin(t * 1.3 + sx); glow(c, sx, sy, sr * 1.8 * p, moon ? '255,210,110' : '255,240,170', .45); c.fillStyle = moon ? 'rgba(255,220,120,.95)' : 'rgba(255,246,200,.9)'; c.beginPath(); c.arc(sx, sy, sr * .38, 0, TAU); c.fill(); }
     for (const [wx, wy] of this.win) { c.fillStyle = `rgba(255,214,110,${.75 + .25 * Math.sin(t * 2 + wx)})`; c.fillRect(wx, wy, 9, 12); glow(c, wx + 4, wy + 6, 22, '255,200,90', .25); }

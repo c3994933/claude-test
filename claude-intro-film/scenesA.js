@@ -20,7 +20,7 @@ function dofBand(c, sharp, blur, y0, y1, feather) {
   const f = feather / (y1 - y0 + 2 * feather);
   g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(f, 'rgba(0,0,0,1)'); g.addColorStop(1 - f, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
   x.globalCompositeOperation = 'destination-in'; x.fillStyle = g; x.fillRect(0, 0, W, H);
-  c.drawImage(blur, 0, 0); c.drawImage(tmp, 0, 0);
+  c.drawImage(blur, 0, 0, W, H); c.drawImage(tmp, 0, 0);
 }
 function layer(name) { const l = layer[name] || (layer[name] = mk(W, H)); const x = l.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = 'source-over'; x.filter = 'none'; x.clearRect(0, 0, W, H); return [l, x]; }
 
@@ -106,12 +106,12 @@ SC.shannon = {
     x.font = 'italic 400 28px "Liberation Serif"'; x.fillText('Fig. 1 — Schematic diagram of a general communication system.', PW / 2, 1190);
     // letterpress: slightly soften and darken
     this.page = mk(PW, PH); const px = this.page.getContext('2d'); px.filter = 'blur(.6px)'; px.drawImage(pg, 0, 0);
-    this.sharp = mk(W, H); this.blur = mk(W, H);
+    this.sharp = mk(W, H); this.blur = mk(W / 2, H / 2);
   },
   draw(c, t, d, S) {
     const k = easeInOut(t / d), z = lerp(1.05, 1.32, k), fy = lerp(-120, 170, k);
-    for (const [cv, f] of [[this.sharp, 0], [this.blur, 7]]) {
-      const x = cv.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.filter = f ? `blur(${f}px)` : 'none';
+    for (const [cv, f] of [[this.sharp, 0], [this.blur, 3.5]]) {
+      const x = cv.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.filter = f ? `blur(${f}px)` : 'none'; if (f) x.scale(.5, .5);
       x.fillStyle = '#1a140e'; x.fillRect(0, 0, W, H);
       x.translate(W / 2, H / 2 - fy); x.rotate(-.06); x.scale(z * PS, z * PS); x.translate(-PW / 2, -PH / 2 + 60); x.drawImage(this.page, 0, 0);
       if (!f) { // signal travelling through the diagram + noise
@@ -228,7 +228,7 @@ SC.library = {
 SC.values = {
   async init() {
     this.paper = await loadImg('plates/parchment.png');
-    this.sharp = mk(W, H); this.blur = mk(W, H);
+    this.sharp = mk(W, H); this.blur = mk(W / 2, H / 2);
   },
   write(x, text, font, col, X, Y, p, t, nib) {
     if (p <= 0) return;
@@ -239,8 +239,8 @@ SC.values = {
   },
   draw(c, t, d, S) {
     const l2 = S.lines[1].at, k = easeInOut(t / d), z = lerp(1.12, 1.0, k);
-    for (const [cv, f] of [[this.sharp, 0], [this.blur, 6]]) {
-      const x = cv.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.filter = f ? `blur(${f}px)` : 'none';
+    for (const [cv, f] of [[this.sharp, 0], [this.blur, 3]]) {
+      const x = cv.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.filter = f ? `blur(${f}px)` : 'none'; if (f) x.scale(.5, .5);
       x.translate(W / 2, H / 2); x.rotate(.03); x.scale(z, z); x.translate(-W / 2, -H / 2);
       x.drawImage(this.paper, -100, -60, W + 200, H + 120);
       const ink = 'rgba(30,22,40,.9)';
