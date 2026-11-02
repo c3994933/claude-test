@@ -33,7 +33,7 @@ SCENES = []
 # 字幕: (开始, 结束, 文本)
 SUBS = [
     (0.3, 4.8, "今天聊一个，有点味道的哲学问题"),
-    (5.0, 8.8, "擦屁股的时候，真正用到的\n只有纸中间那一小块"),
+    (5.0, 8.8, "擦屁股时，真正用到的\n只有中间那一小块"),
     (8.9, 12.0, "周围这一圈，几乎全程摸鱼"),
     (12.2, 18.8, "那把它们裁掉，只留中间\n岂不是又省又环保？"),
     (19.0, 21.8, "结果……你懂的"),
@@ -44,12 +44,34 @@ SUBS = [
     (37.7, 41.8, "人人都知道有用的用处\n却不知道无用的用处"),
     (42.0, 45.8, "杯子能装水，靠的是中间的“空”"),
     (46.0, 49.8, "车轮只压两道印\n路却得修这么宽"),
-    (50.0, 53.8, "电量从不用到 0%\n但最后那 20% 让你不慌"),
+    (50.0, 53.9, "电量从不用光\n最后 20% 让你安心"),
     (54.0, 57.8, "日程里的空白\n让你接得住意外"),
     (58.0, 62.0, "所以，别急着裁掉\n生活里“没用”的那一圈"),
     (62.1, 67.0, "它们没在干活\n它们在兜底"),
 ]
 DURATION = 68.0
+
+# 配音文本（与 SUBS 一一对应；数字写成汉字，便于 TTS 朗读）
+VOICE_LINES = [
+    "今天，聊一个有点味道的哲学问题。",
+    "擦屁股时，真正用到的，只有中间那一小块。",
+    "周围这一圈，几乎全程摸鱼。",
+    "那把它们裁掉，只留中间，岂不是又省又环保？",
+    "结果，你懂的。",
+    "纸太小，手指一戳就穿。",
+    "原来周围那一圈，不是没用，它在兜底。",
+    "它不直接干活，但它让干活的部分，敢放心干活。",
+    "两千多年前，庄子就说过。",
+    "人人都知道有用的用处，却不知道无用的用处。",
+    "杯子能装水，靠的是中间的空。",
+    "车轮只压两道印，路却得修这么宽。",
+    "电量从不用光，最后百分之二十，让你安心。",
+    "日程里的空白，让你接得住意外。",
+    "所以，别急着裁掉生活里没用的那一圈。",
+    "它们没在干活，它们在兜底。",
+]
+# zhtts 包里的模型目录（fastspeech2_quan.tflite / mb_melgan.tflite / baker_mapper.json）
+VOICE_ASSETS = os.environ.get("VOICE_ASSETS", "")
 
 # ---------------------------------------------------------------- 工具
 _font_cache = {}
@@ -695,6 +717,33 @@ def synth_audio(path):
     fo = int(2.0 * SR)
     mix[-fo:] *= np.linspace(1, 0, fo)
 
+    # ---- 配音（可选）：每句塞进对应字幕时间窗，超长就加快语速；配音期间压低音乐
+    voice_track = np.zeros(n)
+    if VOICE_ASSETS:
+        from scipy.signal import resample_poly
+        from voice import Voice, SR as VSR
+        v = Voice(VOICE_ASSETS)
+        for (a, b, _), line in zip(SUBS, VOICE_LINES):
+            room = b - a - 0.15
+            speed = 1.0
+            for _ in range(4):
+                y = v.say(line, speed=speed)
+                dur = len(y) / VSR
+                if dur <= room:
+                    break
+                speed *= room / dur * 0.98
+            y = resample_poly(y, 147, 80)  # 24k -> 44.1k
+            y = y / (np.abs(y).max() + 1e-6) * 0.9
+            i = int((a + 0.05) * SR)
+            j = min(n, i + len(y))
+            voice_track[i:j] += y[: j - i]
+            print(f"voice {a:5.1f}s speed={speed:.2f} dur={len(y)/SR:.2f}/{b-a:.2f} {line}", flush=True)
+        # 侧链压缩：配音包络 -> 音乐增益
+        k = int(0.08 * SR)
+        envv = np.convolve(np.abs(voice_track), np.ones(k) / k, mode="same")
+        envv = np.convolve((envv > 0.01).astype(float), np.ones(k * 3) / (k * 3), mode="same")
+        mix *= 1 - 0.65 * np.clip(envv, 0, 1)
+
     # ---- 音效
     def whoosh(L=0.45):
         s = rng.standard_normal(int(L * SR))
@@ -744,7 +793,8 @@ def synth_audio(path):
     add(ding(1567.98), 56.3, 0.2)
     add(ding(2093.0), 64.0, 0.25)
 
-    mix = np.tanh(mix * 1.2) * 0.85
+    mix = np.tanh(mix * 1.2) * 0.85 + voice_track * 0.75
+    mix = np.clip(mix, -1, 1)
     pcm = (mix * 32767).astype(np.int16)
     stereo = np.stack([pcm, pcm], axis=1)
     with wave.open(path, "wb") as w:
