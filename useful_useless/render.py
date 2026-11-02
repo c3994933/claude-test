@@ -1,18 +1,21 @@
-"""《有用的无用》竖屏短视频渲染脚本。
+"""《有用的无用》横屏短视频渲染脚本（1920×1080，无配音、无配乐，BGM 后期自己加）。
 
-纯 Python（Pillow + numpy）逐帧绘制画面，numpy 合成背景音乐与音效，ffmpeg 合成 mp4。
-运行：python3 render.py  -> 输出 out/有用的无用.mp4 与 out/有用的无用.srt
+纯 Python（Pillow + numpy）逐帧绘制，ffmpeg 编码。
+运行：
+  python3 render.py               -> out/有用的无用_横屏.mp4（无音轨）、out/有用的无用.srt、out/音效_可选.wav
+  python3 render.py preview 10 20 -> 只导出指定秒数的预览帧
 """
 import math
 import os
 import random
 import subprocess
+import sys
 import wave
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
-W, H, FPS = 1080, 1920, 30
+W, H, FPS = 1920, 1080, 30
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "out")
 FONT_PATH = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
@@ -27,51 +30,28 @@ PAPER = (247, 243, 234)
 GREY = (150, 158, 180)
 SKIN = (242, 194, 155)
 
-# ---------------------------------------------------------------- 时间轴
-# 场景: (开始, 结束, 函数名)
-SCENES = []
-# 字幕: (开始, 结束, 文本)
+# 左侧插图中心 / 右侧文字中心
+LX, RX, CY = 660, 1360, 490
+
 SUBS = [
     (0.3, 4.8, "今天聊一个，有点味道的哲学问题"),
-    (5.0, 8.8, "擦屁股时，真正用到的\n只有中间那一小块"),
+    (5.0, 8.8, "擦屁股的时候，真正用到的，只有纸中间那一小块"),
     (8.9, 12.0, "周围这一圈，几乎全程摸鱼"),
-    (12.2, 18.8, "那把它们裁掉，只留中间\n岂不是又省又环保？"),
+    (12.2, 18.8, "那把它们裁掉，只留中间，岂不是又省又环保？"),
     (19.0, 21.8, "结果……你懂的"),
     (21.9, 25.8, "纸太小，手指一戳就穿"),
-    (26.0, 30.2, "原来周围那一圈不是没用\n它在兜底"),
-    (30.3, 34.8, "它不直接干活\n但它让干活的部分，敢放心干活"),
+    (26.0, 30.2, "原来周围那一圈不是没用，它在兜底"),
+    (30.3, 34.8, "它不直接干活，但它让干活的部分，敢放心干活"),
     (35.0, 37.6, "两千多年前，庄子就说过"),
-    (37.7, 41.8, "人人都知道有用的用处\n却不知道无用的用处"),
+    (37.7, 41.8, "人人都知道有用的用处，却不知道无用的用处"),
     (42.0, 45.8, "杯子能装水，靠的是中间的“空”"),
-    (46.0, 49.8, "车轮只压两道印\n路却得修这么宽"),
-    (50.0, 53.9, "电量从不用光\n最后 20% 让你安心"),
-    (54.0, 57.8, "日程里的空白\n让你接得住意外"),
-    (58.0, 62.0, "所以，别急着裁掉\n生活里“没用”的那一圈"),
-    (62.1, 67.0, "它们没在干活\n它们在兜底"),
+    (46.0, 49.8, "车轮只压两道印，路却得修这么宽"),
+    (50.0, 53.8, "电量从不用到 0%，但最后那 20% 让你不慌"),
+    (54.0, 57.8, "日程里的空白，让你接得住意外"),
+    (58.0, 62.0, "所以，别急着裁掉生活里“没用”的那一圈"),
+    (62.1, 67.0, "它们没在干活，它们在兜底"),
 ]
 DURATION = 68.0
-
-# 配音文本（与 SUBS 一一对应；数字写成汉字，便于 TTS 朗读）
-VOICE_LINES = [
-    "今天，聊一个有点味道的哲学问题。",
-    "擦屁股时，真正用到的，只有中间那一小块。",
-    "周围这一圈，几乎全程摸鱼。",
-    "那把它们裁掉，只留中间，岂不是又省又环保？",
-    "结果，你懂的。",
-    "纸太小，手指一戳就穿。",
-    "原来周围那一圈，不是没用，它在兜底。",
-    "它不直接干活，但它让干活的部分，敢放心干活。",
-    "两千多年前，庄子就说过。",
-    "人人都知道有用的用处，却不知道无用的用处。",
-    "杯子能装水，靠的是中间的空。",
-    "车轮只压两道印，路却得修这么宽。",
-    "电量从不用光，最后百分之二十，让你安心。",
-    "日程里的空白，让你接得住意外。",
-    "所以，别急着裁掉生活里没用的那一圈。",
-    "它们没在干活，它们在兜底。",
-]
-# zhtts 包里的模型目录（fastspeech2_quan.tflite / mb_melgan.tflite / baker_mapper.json）
-VOICE_ASSETS = os.environ.get("VOICE_ASSETS", "")
 
 # ---------------------------------------------------------------- 工具
 _font_cache = {}
@@ -127,8 +107,7 @@ def text(img, xy, s, size, fill=WHITE, stroke=0, stroke_fill=(0, 0, 0), alpha=1.
         return
     layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
     text(layer, xy, s, size, fill, stroke, stroke_fill, 1.0, bold, anchor, spacing)
-    a = layer.getchannel("A").point(lambda v: int(v * alpha))
-    layer.putalpha(a)
+    layer.putalpha(layer.getchannel("A").point(lambda v: int(v * alpha)))
     img.alpha_composite(layer)
 
 
@@ -158,8 +137,7 @@ def dashed(d, p0, p1, fill, width=4, dash=18, gap=12, phase=0.0):
     if L == 0:
         return
     ux, uy = (x1 - x0) / L, (y1 - y0) / L
-    s = -phase % (dash + gap)
-    s -= dash + gap
+    s = -phase % (dash + gap) - (dash + gap)
     while s < L:
         a, b = max(0, s), min(L, s + dash)
         if b > a:
@@ -177,13 +155,23 @@ def arrow(d, p0, p1, fill, width=6, head=24):
 
 def tag(img, cx, cy, s, size, bg, fg=(20, 20, 20), alpha=1.0, pad=(26, 14)):
     f = font(size)
-    l, t, r, b = f.getbbox(s)
+    l, _, r, _ = f.getbbox(s)
     w, h = r - l + pad[0] * 2, size + pad[1] * 2
 
     def fn(d, _):
         rrect(d, (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), h / 2, fill=bg)
     overlay(img, fn, alpha)
     text(img, (cx, cy), s, size, fg, alpha=alpha)
+
+
+def big_title(img, t0_scale, t1_scale, y=470, alpha=1.0):
+    """一行大标题：白色“有用的” + 黄色“无用”。"""
+    s1, s2 = 190, 250
+    f1, f2 = font(s1), font(s2)
+    w1, w2 = f1.getlength("有用的"), f2.getlength("无用")
+    x0 = W / 2 - (w1 + w2 + 20) / 2
+    text(img, (x0 + w1 / 2, y), "有用的", s1 * t0_scale, WHITE, stroke=10, alpha=alpha)
+    text(img, (x0 + w1 + 20 + w2 / 2, y - 6), "无用", s2 * t1_scale, YELLOW, stroke=12, alpha=alpha)
 
 
 # ---------------------------------------------------------------- 背景
@@ -194,105 +182,89 @@ def make_background():
         d.line([(x, 0), (x, H)], fill=(28, 34, 52), width=2)
     for y in range(0, H + 1, 60):
         d.line([(0, y), (W, y)], fill=(28, 34, 52), width=2)
-    # 暗角
     yy, xx = np.mgrid[0:H, 0:W]
-    r = np.sqrt(((xx - W / 2) / (W * 0.75)) ** 2 + ((yy - H / 2) / (H * 0.62)) ** 2)
+    r = np.sqrt(((xx - W / 2) / (W * 0.62)) ** 2 + ((yy - H / 2) / (H * 0.75)) ** 2)
     v = np.clip(r - 0.35, 0, 1) * 0.75
     arr = np.array(bg).astype(np.float32)
     arr[..., :3] *= (1 - v)[..., None]
     return Image.fromarray(arr.astype(np.uint8), "RGBA")
 
 
-# ---------------------------------------------------------------- 元素：卫生纸
-def draw_paper(img, cx, cy, w, h, alpha=1.0, tint=None, emboss=True, rot_tear=0.0):
-    def fn(d, layer):
-        # 阴影
-        rrect(d, (cx - w / 2 + 14, cy - h / 2 + 22, cx + w / 2 + 14, cy + h / 2 + 22), 18, fill=(0, 0, 0, 110))
-        rrect(d, (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), 18, fill=PAPER)
-        if emboss and w > 120:
-            step = 46
-            nx = int(w // step)
-            ny = int(h // step)
-            ox = cx - (nx - 1) * step / 2
-            oy = cy - (ny - 1) * step / 2
+# ---------------------------------------------------------------- 元素
+def draw_paper(img, cx, cy, w, h, alpha=1.0, emboss=True):
+    def fn(d, _):
+        rrect(d, (cx - w / 2 + 12, cy - h / 2 + 18, cx + w / 2 + 12, cy + h / 2 + 18), 16, fill=(0, 0, 0, 110))
+        rrect(d, (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), 16, fill=PAPER)
+        if emboss and w > 100:
+            step = 36
+            nx, ny = int(w // step), int(h // step)
+            ox, oy = cx - (nx - 1) * step / 2, cy - (ny - 1) * step / 2
             for i in range(nx):
                 for j in range(ny):
                     x, y = ox + i * step, oy + j * step
                     if (i + j) % 2 == 0:
-                        d.ellipse((x - 7, y - 7, x + 7, y + 7), outline=(222, 214, 198), width=3)
+                        d.ellipse((x - 6, y - 6, x + 6, y + 6), outline=(222, 214, 198), width=2)
                     else:
-                        d.ellipse((x - 3, y - 3, x + 3, y + 3), fill=(226, 219, 204))
-        if w > 120:
-            for yy in (cy - h / 2 + 22, cy + h / 2 - 22):
-                dashed(d, (cx - w / 2 + 20, yy), (cx + w / 2 - 20, yy), (205, 196, 178), width=4, dash=14, gap=10)
-        if tint:
-            rrect(d, (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), 18, fill=tint)
+                        d.ellipse((x - 2.5, y - 2.5, x + 2.5, y + 2.5), fill=(226, 219, 204))
+        if w > 100:
+            for yy in (cy - h / 2 + 18, cy + h / 2 - 18):
+                dashed(d, (cx - w / 2 + 16, yy), (cx + w / 2 - 16, yy), (205, 196, 178), width=3, dash=12, gap=9)
     overlay(img, fn, alpha)
 
 
-def draw_finger(img, tipx, tipy, alpha=1.0, width=120, length=520):
+def draw_finger(img, tipx, tipy, alpha=1.0, width=90, length=420):
     def fn(d, _):
         x0, x1 = tipx - width / 2, tipx + width / 2
-        d.rounded_rectangle((x0 + 10, tipy - length + 20, x1 + 10, tipy + 20), radius=width / 2, fill=(0, 0, 0, 90))
+        d.rounded_rectangle((x0 + 8, tipy - length + 16, x1 + 8, tipy + 16), radius=width / 2, fill=(0, 0, 0, 90))
         d.rounded_rectangle((x0, tipy - length, x1, tipy), radius=width / 2, fill=SKIN)
-        # 指甲
         d.rounded_rectangle((tipx - width * 0.3, tipy - width * 0.95, tipx + width * 0.3, tipy - width * 0.2),
                             radius=width * 0.25, fill=(250, 220, 200), outline=(220, 170, 140), width=3)
-        # 关节纹
         for k in (0.45, 0.72):
             y = tipy - length * k
-            d.arc((tipx - width * 0.28, y - 12, tipx + width * 0.28, y + 12), 200, 340, fill=(205, 150, 115), width=4)
+            d.arc((tipx - width * 0.28, y - 10, tipx + width * 0.28, y + 10), 200, 340, fill=(205, 150, 115), width=4)
     overlay(img, fn, alpha)
 
 
 # ---------------------------------------------------------------- 场景
+PW, PH = 440, 520      # 完整纸巾
+SW, SH = 190, 220      # 裁剪后的小纸片
+ERX, ERY = 120, 150    # 使用区椭圆
+
+
 def header(img, t):
-    # 顶部栏目标识 + 进度条
-    text(img, (W / 2, 150), "有用的无用 · 冷知识研究所", 34, GREY, bold=False)
+    text(img, (W / 2, 46), "有用的无用 · 冷知识研究所", 28, GREY, bold=False)
     p = clamp(t / DURATION)
     d = ImageDraw.Draw(img)
-    rrect(d, (90, 196, W - 90, 204), 4, fill=(40, 46, 66))
-    if p > 0.005:
-        rrect(d, (90, 196, 90 + (W - 180) * p, 204), 4, fill=YELLOW)
+    rrect(d, (160, 78, W - 160, 84), 3, fill=(40, 46, 66))
+    if p > 0.003:
+        rrect(d, (160, 78, 160 + (W - 320) * p, 84), 3, fill=YELLOW)
 
 
 def scene_title(img, t):
-    # 0 - 5s
-    p = ease_back(prog(t, 0.1, 0.7))
     out = 1 - prog(t, 4.4, 5.0)
-    s = 190 * p
-    text(img, (W / 2, 760), "有用的", s, WHITE, stroke=10, stroke_fill=(0, 0, 0), alpha=out)
-    p2 = ease_back(prog(t, 0.45, 1.05))
-    text(img, (W / 2, 990), "无用", 260 * p2, YELLOW, stroke=12, stroke_fill=(0, 0, 0), alpha=out)
-    # 小卷纸图标掉落
+    big_title(img, ease_back(prog(t, 0.1, 0.7)), ease_back(prog(t, 0.45, 1.05)), y=430, alpha=out)
     p3 = ease_out(prog(t, 1.2, 1.9))
     if p3 > 0:
-        y = lerp(300, 1190, p3)
-        draw_paper(img, W / 2, y, 180, 120, alpha=out, emboss=False)
-    a4 = prog(t, 1.9, 2.4) * out
-    text(img, (W / 2, 1330), "—— 一个关于擦屁股的哲学问题 ——", 46, GREY, alpha=a4, bold=False)
+        draw_paper(img, W / 2, lerp(-80, 700, p3), 150, 100, alpha=out, emboss=False)
+    text(img, (W / 2, 830), "—— 一个关于擦屁股的哲学问题 ——", 42, GREY,
+         alpha=prog(t, 1.9, 2.4) * out, bold=False)
 
 
 def scene_paper(img, t):
-    # 5 - 12s：纸 + 使用区 + 摸鱼区
     a = prog(t, 0.0, 0.5) * (1 - prog(t, 6.6, 7.0))
     sc = ease_back(prog(t, 0.0, 0.6))
-    pw, ph = 700 * sc, 820 * sc
-    cx, cy = W / 2, 820
+    pw, ph = PW * sc, PH * sc
+    cx, cy = LX, CY
     draw_paper(img, cx, cy, pw, ph, alpha=a)
-    # 使用区高亮
     p = ease_out(prog(t, 1.0, 1.8))
     if p > 0:
-        rx, ry = 190 * p, 230 * p
         pulse = 1 + 0.04 * math.sin(t * 6)
+        rx, ry = ERX * p * pulse, ERY * p * pulse
 
         def fn(d, _):
-            d.ellipse((cx - rx * pulse, cy - ry * pulse, cx + rx * pulse, cy + ry * pulse),
-                      fill=YELLOW + (90,), outline=YELLOW, width=8)
+            d.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=YELLOW + (90,), outline=YELLOW, width=7)
         overlay(img, fn, a)
-        text(img, (cx, cy - 20), "真正干活", 58, (60, 40, 0), alpha=a * prog(t, 1.6, 2.0))
-        text(img, (cx, cy + 50), "≈ 30%", 52, (60, 40, 0), alpha=a * prog(t, 1.8, 2.2))
-    # 摸鱼区闪烁
+        text(img, (cx, cy), "干活区", 44, (60, 40, 0), alpha=a * prog(t, 1.6, 2.0))
     q = prog(t, 3.9, 4.3)
     if q > 0:
         blink = 0.55 + 0.45 * math.sin((t - 3.9) * 10)
@@ -300,283 +272,247 @@ def scene_paper(img, t):
 
         def fn2(d, _):
             for i in range(4):
-                o = 6 + i * 2
-                d.rounded_rectangle((x0 + o, y0 + o, x1 - o, y1 - o), radius=18, outline=RED + (int(200 * blink),), width=6)
+                o = 5 + i * 2
+                d.rounded_rectangle((x0 + o, y0 + o, x1 - o, y1 - o), radius=16, outline=RED + (int(200 * blink),), width=5)
         overlay(img, fn2, a * q)
-        for (tx, ty) in ((cx - 250, cy - 330), (cx + 250, cy + 330), (cx + 255, cy - 300), (cx - 255, cy + 310)):
-            tag(img, tx, ty, "摸鱼", 40, RED, WHITE, alpha=a * q)
+        for tx, ty in ((cx - 150, cy - 205), (cx + 150, cy + 205), (cx + 155, cy - 190), (cx - 155, cy + 195)):
+            tag(img, tx, ty, "摸鱼", 30, RED, WHITE, alpha=a * q)
+
+    # 右侧：占比条形图
+    def bar(y, label, pct, col, k, al):
+        text(img, (RX - 300, y - 50), label, 46, col, alpha=al, anchor="lm")
+        text(img, (RX + 300, y - 50), f"{int(pct * k)}%", 46, col, alpha=al, anchor="rm")
+
+        def fn3(d, _):
+            rrect(d, (RX - 300, y - 14, RX + 300, y + 14), 14, fill=(40, 46, 66))
+            if k > 0.01:
+                rrect(d, (RX - 300, y - 14, RX - 300 + 600 * pct / 100 * k, y + 14), 14, fill=col)
+        overlay(img, fn3, al)
+    bar(390, "真正干活", 30, YELLOW, ease_out(prog(t, 1.6, 2.6)), a * prog(t, 1.4, 1.8))
+    bar(590, "全程摸鱼", 70, RED, ease_out(prog(t, 4.0, 5.0)), a * prog(t, 3.8, 4.2))
 
 
 def scene_cut(img, t):
-    # 12 - 19s：剪掉摸鱼区
-    cx, cy = W / 2, 820
-    pw, ph = 700, 820
-    sw, sh = 300, 340  # 剩下的小纸片
-    a_in = prog(t, 0.0, 0.3)
-    cut = prog(t, 0.8, 3.0)       # 剪刀沿虚线走
-    fall = ease_in_out(prog(t, 3.2, 4.4))  # 边角飞走
+    cx, cy = LX, CY
+    fall = ease_in_out(prog(t, 3.2, 4.4))
     fade_out = 1 - prog(t, 6.6, 7.0)
-    a = a_in * fade_out
+    a = prog(t, 0.0, 0.3) * fade_out
     if fall < 1:
-        # 四条边分别飞走
-        offs = fall * 900
+        offs = fall * 700
         parts = [
-            (cx, cy - (ph + sh) / 4 - offs, pw, (ph - sh) / 2),          # 上
-            (cx, cy + (ph + sh) / 4 + offs, pw, (ph - sh) / 2),          # 下
-            (cx - (pw + sw) / 4 - offs, cy, (pw - sw) / 2, sh),          # 左
-            (cx + (pw + sw) / 4 + offs, cy, (pw - sw) / 2, sh),          # 右
+            (cx, cy - (PH + SH) / 4 - offs, PW, (PH - SH) / 2),
+            (cx, cy + (PH + SH) / 4 + offs, PW, (PH - SH) / 2),
+            (cx - (PW + SW) / 4 - offs, cy, (PW - SW) / 2, SH),
+            (cx + (PW + SW) / 4 + offs, cy, (PW - SW) / 2, SH),
         ]
-        for (x, y, w, h) in parts:
+        for x, y, w, h in parts:
             draw_paper(img, x, y, w, h, alpha=a * (1 - fall), emboss=False)
-    draw_paper(img, cx, cy, sw, sh, alpha=a, emboss=True)
-    # 裁剪虚线与剪刀
+    draw_paper(img, cx, cy, SW, SH, alpha=a)
+    cut = prog(t, 0.8, 3.0)
     if fall < 0.2 and cut > 0:
-        L = 2 * (sw + sh)
-        prog_len = cut * L
-        pts = [(cx - sw / 2, cy - sh / 2), (cx + sw / 2, cy - sh / 2), (cx + sw / 2, cy + sh / 2),
-               (cx - sw / 2, cy + sh / 2), (cx - sw / 2, cy - sh / 2)]
+        pts = [(cx - SW / 2, cy - SH / 2), (cx + SW / 2, cy - SH / 2), (cx + SW / 2, cy + SH / 2),
+               (cx - SW / 2, cy + SH / 2), (cx - SW / 2, cy - SH / 2)]
 
         def fn(d, _):
-            rem = prog_len
+            rem = cut * 2 * (SW + SH)
             head = pts[0]
             for i in range(4):
                 p0, p1 = pts[i], pts[i + 1]
                 seg = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
                 k = clamp(rem / seg)
                 e = (lerp(p0[0], p1[0], k), lerp(p0[1], p1[1], k))
-                dashed(d, p0, e, RED, width=6, dash=20, gap=12)
+                dashed(d, p0, e, RED, width=5, dash=16, gap=10)
                 if k > 0:
                     head = e
                 rem -= seg
                 if rem <= 0:
                     break
-            # 剪刀
             hx, hy = head
             ang = math.sin(t * 30) * 0.35
             for s in (-1, 1):
                 a2 = ang * s
-                d.line([(hx, hy), (hx - 90 * math.cos(a2 + 0.3 * s), hy - 90 * math.sin(a2 + 0.3 * s))], fill=WHITE, width=10)
-                ex, ey = hx - 120 * math.cos(a2 + 0.4 * s), hy - 120 * math.sin(a2 + 0.4 * s)
-                d.ellipse((ex - 26, ey - 26, ex + 26, ey + 26), outline=CYAN, width=9)
+                d.line([(hx, hy), (hx - 75 * math.cos(a2 + 0.3 * s), hy - 75 * math.sin(a2 + 0.3 * s))], fill=WHITE, width=8)
+                ex, ey = hx - 100 * math.cos(a2 + 0.4 * s), hy - 100 * math.sin(a2 + 0.4 * s)
+                d.ellipse((ex - 22, ey - 22, ex + 22, ey + 22), outline=CYAN, width=8)
         overlay(img, fn, a * (1 - fall * 5))
-    # 文字
     tp = ease_back(prog(t, 4.5, 5.0))
-    text(img, (cx, 1160), "又省又环保", 80 * tp, GREEN, stroke=6, alpha=fade_out)
-    text(img, (cx, 470), "√ 节省 70%", 54, GREEN, alpha=fade_out * prog(t, 5.0, 5.4))
+    text(img, (RX, 430), "又省又环保", 110 * tp, GREEN, stroke=6, alpha=fade_out)
+    text(img, (RX, 580), "√ 节省 70% 纸巾", 52, GREEN, alpha=fade_out * prog(t, 5.0, 5.4))
+    text(img, (RX, 200), "裁 掉 摸 鱼 区", 56, WHITE, alpha=fade_out * prog(t, 0.5, 0.9) * (1 - prog(t, 4.2, 4.5)))
 
 
 def scene_fail(img, t):
-    # 19 - 26s：手指戳穿
-    cx, cy = W / 2, 820
-    sw, sh = 300, 340
+    cx, cy = LX, CY
     a = prog(t, 0, 0.2) * (1 - prog(t, 6.6, 7.0))
     poke = ease_in_out(prog(t, 0.6, 1.6))
     torn = t > 1.6
-    draw_paper(img, cx, cy, sw, sh, alpha=a)
+    draw_paper(img, cx, cy, SW, SH, alpha=a)
     if torn:
-        # 破洞
         def fn(d, _):
-            r = 70
-            pts = []
             rnd = random.Random(7)
+            pts = []
             for i in range(14):
                 ang = i / 14 * math.tau
-                rr = r * (0.7 + 0.5 * rnd.random())
-                pts.append((cx + rr * math.cos(ang), cy + 40 + rr * math.sin(ang)))
+                rr = 48 * (0.7 + 0.5 * rnd.random())
+                pts.append((cx + rr * math.cos(ang), cy + 30 + rr * math.sin(ang)))
             d.polygon(pts, fill=BG)
             d.line(pts + [pts[0]], fill=(200, 190, 170), width=4)
         overlay(img, fn, a)
-    tipy = lerp(260, cy + 110, poke)
-    draw_finger(img, cx, tipy, alpha=a)
+    draw_finger(img, cx, lerp(110, cy + 80, poke), alpha=a)
     if torn:
-        # 红色警报 + 大字
-        k = prog(t, 1.6, 1.9)
         flash = max(0.0, 1 - (t - 1.6) * 2.5)
-
-        def fn2(d, _):
-            d.rectangle((0, 0, W, H), fill=RED + (int(120 * flash),))
-        overlay(img, fn2, 1)
-        s = ease_back(k)
-        text(img, (cx, 1180), "翻 车 了", 150 * s, RED, stroke=10, stroke_fill=WHITE, alpha=a)
-        text(img, (cx, 430), "⚠ 穿透警告 ⚠" if False else "! 穿透警告 !", 62, YELLOW, alpha=a * prog(t, 2.2, 2.5))
+        if flash > 0:
+            overlay(img, lambda d, _: d.rectangle((0, 0, W, H), fill=RED + (int(120 * flash),)), 1)
+        text(img, (RX, 440), "翻 车 了", 170 * ease_back(prog(t, 1.6, 1.9)), RED, stroke=10, stroke_fill=WHITE, alpha=a)
+        text(img, (RX, 620), "! 穿透警告 !", 56, YELLOW, alpha=a * prog(t, 2.2, 2.5))
 
 
 def scene_reveal(img, t):
-    # 26 - 35s：周围那圈 = 有用的无用
-    cx, cy = W / 2, 800
+    cx, cy = LX, CY
     a = prog(t, 0, 0.4) * (1 - prog(t, 8.6, 9.0))
     grow = ease_back(prog(t, 0.0, 0.8))
-    pw, ph = lerp(300, 700, grow), lerp(340, 820, grow)
+    pw, ph = lerp(SW, PW, grow), lerp(SH, PH, grow)
     draw_paper(img, cx, cy, pw, ph, alpha=a)
-    # 外圈青色
     q = ease_out(prog(t, 1.0, 1.6))
 
     def ring(d, _):
         x0, y0, x1, y1 = cx - pw / 2, cy - ph / 2, cx + pw / 2, cy + ph / 2
-        d.rounded_rectangle((x0, y0, x1, y1), radius=18, fill=CYAN + (70,))
-        d.ellipse((cx - 190, cy - 230, cx + 190, cy + 230), fill=PAPER)
-        d.ellipse((cx - 190, cy - 230, cx + 190, cy + 230), fill=YELLOW + (110,), outline=YELLOW, width=8)
-        d.rounded_rectangle((x0, y0, x1, y1), radius=18, outline=CYAN, width=8)
+        d.rounded_rectangle((x0, y0, x1, y1), radius=16, fill=CYAN + (70,))
+        d.ellipse((cx - ERX, cy - ERY, cx + ERX, cy + ERY), fill=PAPER)
+        d.ellipse((cx - ERX, cy - ERY, cx + ERX, cy + ERY), fill=YELLOW + (110,), outline=YELLOW, width=7)
+        d.rounded_rectangle((x0, y0, x1, y1), radius=16, outline=CYAN, width=7)
     overlay(img, ring, a * q)
-    text(img, (cx, cy), "有用", 84, (70, 50, 0), alpha=a * q)
-    # 标签
-    r = prog(t, 1.6, 2.0)
-    tag(img, cx, cy - ph / 2 - 70, "有用的无用", 52, CYAN, (10, 30, 40), alpha=a * r)
-    labels = ["缓冲", "容错", "安全感"]
-    for i, s in enumerate(labels):
+    text(img, (cx, cy), "有用", 70, (70, 50, 0), alpha=a * q)
+    text(img, (cx, cy - ph / 2 + 44), "有用的无用", 36, (10, 70, 80), alpha=a * prog(t, 1.6, 2.0))
+    # 右侧三个关键词 + 指向外圈的箭头
+    for i, s in enumerate(["缓冲", "容错", "安全感"]):
+        y = 300 + i * 190
         k = ease_back(prog(t, 4.3 + i * 0.4, 4.8 + i * 0.4))
-        x = cx + (i - 1) * 290
-        text(img, (x, 1330), s, 72 * k, CYAN, stroke=5, alpha=a)
-    def arrows(d, _):
-        for i in range(3):
-            x = cx + (i - 1) * 290
-            arrow(d, (x, 1280), (lerp(x, cx + (i - 1) * 240, 1), cy + ph / 2 - 10), CYAN + (200,), width=5)
-    overlay(img, arrows, a * prog(t, 5.6, 6.0))
+        text(img, (RX + 60, y), s, 96 * k, CYAN, stroke=5, alpha=a)
+
+        def arr(d, _, y=y, i=i):
+            arrow(d, (RX - 120, y), (cx + pw / 2 + 20, cy + (i - 1) * 180), CYAN + (200,), width=5)
+        overlay(img, arr, a * prog(t, 4.6 + i * 0.4, 5.0 + i * 0.4))
+    text(img, (RX + 60, 160), "外 圈 在 干 嘛 ？", 44, GREY, alpha=a * prog(t, 2.0, 2.4) * (1 - prog(t, 4.0, 4.3)), bold=False)
 
 
 def scene_quote(img, t):
-    # 35 - 42s：庄子
     a = prog(t, 0, 0.4) * (1 - prog(t, 6.6, 7.0))
-    s = ease_back(prog(t, 0.0, 0.6))
-    text(img, (W / 2, 520), "庄子", 120 * s, YELLOW, stroke=8, alpha=a)
-    text(img, (W / 2, 640), "《人间世》", 46, GREY, alpha=a * prog(t, 0.5, 0.9), bold=False)
-    full1 = "人皆知有用之用，"
-    full2 = "而莫知无用之用也。"
+    text(img, (W / 2, 220), "庄子", 110 * ease_back(prog(t, 0.0, 0.6)), YELLOW, stroke=8, alpha=a)
+    text(img, (W / 2, 320), "《人间世》", 42, GREY, alpha=a * prog(t, 0.5, 0.9), bold=False)
+    full1, full2 = "人皆知有用之用，", "而莫知无用之用也。"
     n = int(prog(t, 1.2, 4.0) * (len(full1) + len(full2)))
-    l1 = full1[:n]
-    l2 = full2[:max(0, n - len(full1))]
-    text(img, (W / 2, 860), l1, 76, WHITE, alpha=a)
-    text(img, (W / 2, 980), l2, 76, WHITE, alpha=a)
-    # 下划线强调“无用之用”
+    text(img, (W / 2, 500), full1[:n], 84, WHITE, alpha=a)
+    text(img, (W / 2, 630), full2[:max(0, n - len(full1))], 84, WHITE, alpha=a)
     if n >= len(full1) + len(full2):
         k = ease_out(prog(t, 4.2, 4.8))
-        f = font(76)
-        wtot = f.getlength(full2)
-        x0 = W / 2 - wtot / 2 + f.getlength("而莫知")
+        f = font(84)
+        x0 = W / 2 - f.getlength(full2) / 2 + f.getlength("而莫知")
         x1 = x0 + f.getlength("无用之用")
-
-        def fn(d, _):
-            d.line([(x0, 1035), (lerp(x0, x1, k), 1035)], fill=YELLOW, width=10)
-        overlay(img, fn, a)
-    # 引号装饰
-    text(img, (150, 760), "“", 200, (60, 68, 96), alpha=a)
-    text(img, (930, 1090), "”", 200, (60, 68, 96), alpha=a)
+        overlay(img, lambda d, _: d.line([(x0, 690), (lerp(x0, x1, k), 690)], fill=YELLOW, width=10), a)
+    text(img, (430, 430), "“", 220, (60, 68, 96), alpha=a)
+    text(img, (1490, 700), "”", 220, (60, 68, 96), alpha=a)
 
 
-def card_frame(img, t, title, idx, a):
+def card_text(img, t, idx, title, line1, line2, a, col=WHITE):
     s = ease_back(prog(t, 0, 0.5))
-    text(img, (W / 2, 380), f"No.{idx}", 46, GREY, alpha=a, bold=False)
-    text(img, (W / 2, 470), title, 92 * s, WHITE, stroke=6, alpha=a)
+    text(img, (RX, 250), f"No.{idx} / 4", 40, GREY, alpha=a, bold=False)
+    text(img, (RX, 360), title, 120 * s, WHITE, stroke=6, alpha=a)
+    text(img, (RX, 540), line1, 56, col, alpha=a * prog(t, 1.4, 1.8))
+    text(img, (RX, 630), line2, 40, GREY, alpha=a * prog(t, 2.2, 2.6), bold=False)
 
 
 def scene_cup(img, t):
     a = prog(t, 0, 0.3) * (1 - prog(t, 3.7, 4.0))
-    card_frame(img, t, "杯子", 1, a)
-    cx, top, bot = W / 2, 640, 1180
+    card_text(img, t, 1, "杯子", "装水靠的是“空”", "当其无，有器之用 —— 老子", a, CYAN)
+    cx, top, bot = LX, 250, 730
     lvl = ease_out(prog(t, 0.6, 2.4))
 
     def fn(d, _):
-        # 水
-        wy = lerp(bot - 20, top + 90, lvl)
+        wy = lerp(bot - 16, top + 70, lvl)
         k0 = (wy - top) / (bot - top)
-        wl = lerp(260, 190, k0)
-        d.polygon([(cx - wl, wy), (cx + wl, wy), (cx + 190, bot - 20), (cx - 190, bot - 20)], fill=CYAN + (170,))
-        # 杯身
-        d.line([(cx - 260, top), (cx - 190, bot), (cx + 190, bot), (cx + 260, top)], fill=WHITE, width=14, joint="curve")
-        d.arc((cx + 220, top + 120, cx + 380, top + 340), 270, 90, fill=WHITE, width=14)
+        wl = lerp(210, 150, k0)
+        d.polygon([(cx - wl, wy), (cx + wl, wy), (cx + 150, bot - 16), (cx - 150, bot - 16)], fill=CYAN + (170,))
+        d.line([(cx - 210, top), (cx - 150, bot), (cx + 150, bot), (cx + 210, top)], fill=WHITE, width=12, joint="curve")
+        d.arc((cx + 175, top + 100, cx + 310, top + 290), 270, 90, fill=WHITE, width=12)
     overlay(img, fn, a)
-    q = prog(t, 2.4, 2.8)
-    tag(img, cx, 900, "空", 70, YELLOW, (40, 30, 0), alpha=a * q)
-    text(img, (cx, 1310), "当其无，有器之用 —— 老子", 44, GREY, alpha=a * prog(t, 2.6, 3.0), bold=False)
+    tag(img, cx, 470, "空", 64, YELLOW, (40, 30, 0), alpha=a * prog(t, 2.4, 2.8))
 
 
 def scene_road(img, t):
     a = prog(t, 0, 0.3) * (1 - prog(t, 3.7, 4.0))
-    card_frame(img, t, "马路", 2, a)
-    cx, top, bot = W / 2, 620, 1220
+    card_text(img, t, 2, "马路", "轮子只压两道印", "路却得修这么宽", a, YELLOW)
+    cx, top, bot = LX, 200, 800
     p = ease_out(prog(t, 0.4, 1.0))
 
     def fn(d, _):
-        d.polygon([(cx - 120, top), (cx + 120, top), (cx + 440, bot), (cx - 440, bot)], fill=(70, 76, 96))
-        dashed(d, (cx, top), (cx, bot), WHITE, width=8, dash=40, gap=30, phase=t * 160)
-        d.line([(cx - 120, top), (cx - 440, bot)], fill=WHITE, width=6)
-        d.line([(cx + 120, top), (cx + 440, bot)], fill=WHITE, width=6)
-        # 车辙
-        for off0, off1 in ((-55, -210), (-15, -70)):
-            d.line([(cx + off0, top), (lerp(cx + off0, cx + off1, 1), lerp(top, bot, p))], fill=YELLOW, width=16)
+        d.polygon([(cx - 100, top), (cx + 100, top), (cx + 380, bot), (cx - 380, bot)], fill=(70, 76, 96))
+        dashed(d, (cx, top), (cx, bot), WHITE, width=7, dash=36, gap=26, phase=t * 160)
+        d.line([(cx - 100, top), (cx - 380, bot)], fill=WHITE, width=5)
+        d.line([(cx + 100, top), (cx + 380, bot)], fill=WHITE, width=5)
+        for o0, o1 in ((-48, -180), (-14, -60)):
+            d.line([(cx + o0, top), (lerp(cx + o0, cx + o1, p), lerp(top, bot, p))], fill=YELLOW, width=14)
     overlay(img, fn, a)
     q = prog(t, 1.5, 1.9)
-    tag(img, cx - 140, 1270, "压到的", 40, YELLOW, (40, 30, 0), alpha=a * q)
-    tag(img, cx + 230, 1000, "没压到的", 40, CYAN, (10, 30, 40), alpha=a * q)
+    tag(img, cx - 130, 840, "压到的", 34, YELLOW, (40, 30, 0), alpha=a * q)
+    tag(img, cx + 200, 560, "没压到的", 34, CYAN, (10, 30, 40), alpha=a * q)
 
 
 def scene_battery(img, t):
     a = prog(t, 0, 0.3) * (1 - prog(t, 3.7, 4.0))
-    card_frame(img, t, "电量", 3, a)
-    cx, cy = W / 2, 880
-    bw, bh = 640, 300
+    card_text(img, t, 3, "电量", "最后 20% = 安全感", "你从来不会真的用到 0%", a, GREEN)
+    cx, cy, bw, bh = LX, 450, 520, 240
     lvl = lerp(1.0, 0.2, ease_in_out(prog(t, 0.4, 2.0)))
-    col = GREEN if lvl > 0.21 else (GREEN if int(t * 4) % 2 else (60, 160, 90))
+    col = GREEN if lvl > 0.21 or int(t * 4) % 2 else (60, 160, 90)
 
     def fn(d, _):
-        d.rounded_rectangle((cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2), radius=36, outline=WHITE, width=14)
-        d.rounded_rectangle((cx + bw / 2 + 6, cy - 60, cx + bw / 2 + 46, cy + 60), radius=12, fill=WHITE)
-        iw = bw - 60
-        d.rounded_rectangle((cx - iw / 2, cy - bh / 2 + 30, cx - iw / 2 + iw * lvl, cy + bh / 2 - 30), radius=16, fill=col)
+        d.rounded_rectangle((cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2), radius=30, outline=WHITE, width=12)
+        d.rounded_rectangle((cx + bw / 2 + 6, cy - 50, cx + bw / 2 + 40, cy + 50), radius=10, fill=WHITE)
+        iw = bw - 50
+        d.rounded_rectangle((cx - iw / 2, cy - bh / 2 + 25, cx - iw / 2 + iw * lvl, cy + bh / 2 - 25), radius=14, fill=col)
     overlay(img, fn, a)
-    text(img, (cx, cy + bh / 2 + 90), f"{int(round(lvl * 100))}%", 90, WHITE, alpha=a)
-    q = prog(t, 2.1, 2.5)
-    tag(img, cx, cy - bh / 2 - 90, "这 20% = 安全感", 46, GREEN, (10, 40, 20), alpha=a * q)
+    text(img, (cx, cy + bh / 2 + 80), f"{int(round(lvl * 100))}%", 84, WHITE, alpha=a)
 
 
 def scene_calendar(img, t):
     a = prog(t, 0, 0.3) * (1 - prog(t, 3.7, 4.0))
-    card_frame(img, t, "日程", 4, a)
-    x0, y0, cw, ch, gap = 150, 640, 180, 120, 20
+    card_text(img, t, 4, "日程", "空白，是留给意外的座位", "排满的日程，接不住任何变化", a, CYAN)
+    cw, ch, gap = 140, 96, 16
+    x0, y0 = LX - (4 * cw + 3 * gap) / 2, 250
     filled = {(0, 0), (1, 0), (3, 0), (0, 1), (2, 1), (3, 1), (1, 2), (2, 2), (0, 3), (3, 3), (2, 3)}
     colors = [(118, 132, 255), (255, 150, 90), (200, 120, 230)]
     fly = ease_out(prog(t, 1.2, 2.2))
+    tx, ty = x0 + (cw + gap), y0 + (ch + gap)
+    fx, fy = lerp(W / 2 + 200, tx, fly), lerp(120, ty, fly)
 
     def fn(d, _):
         for r in range(4):
             for c in range(4):
                 bx, by = x0 + c * (cw + gap), y0 + r * (ch + gap)
                 if (c, r) in filled:
-                    d.rounded_rectangle((bx, by, bx + cw, by + ch), radius=18, fill=colors[(r + c) % 3])
+                    d.rounded_rectangle((bx, by, bx + cw, by + ch), radius=16, fill=colors[(r + c) % 3])
                 else:
-                    d.rounded_rectangle((bx, by, bx + cw, by + ch), radius=18, outline=GREY, width=4)
-        # 意外块飞入空格 (1,1)
-        tx, ty = x0 + 1 * (cw + gap), y0 + 1 * (ch + gap)
-        fx, fy = lerp(W + 50, tx, fly), lerp(300, ty, fly)
-        d.rounded_rectangle((fx, fy, fx + cw, fy + ch), radius=18, fill=RED)
+                    d.rounded_rectangle((bx, by, bx + cw, by + ch), radius=16, outline=GREY, width=4)
+        d.rounded_rectangle((fx, fy, fx + cw, fy + ch), radius=16, fill=RED)
     overlay(img, fn, a)
-    tx, ty = x0 + 1 * (cw + gap) + cw / 2, y0 + 1 * (ch + gap) + ch / 2
-    text(img, (lerp(W + 140, tx, fly), lerp(360, ty, fly)), "意外", 46, WHITE, alpha=a)
-    q = prog(t, 2.3, 2.7)
-    text(img, (W / 2, 1270), "空白，是留给意外的座位", 52, CYAN, alpha=a * q)
+    text(img, (fx + cw / 2, fy + ch / 2), "意外", 40, WHITE, alpha=a)
 
 
 def scene_end(img, t):
-    # 58 - 68s
     a = prog(t, 0, 0.4)
-    # 完整纸巾 + 外圈
     s = ease_back(prog(t, 0, 0.7))
-    cx, cy = W / 2, 760
-    pw, ph = 420 * s, 500 * s
-    draw_paper(img, cx, cy, pw, ph, alpha=a * (1 - prog(t, 4.0, 4.6)))
+    cx, cy = W / 2, CY
+    pw, ph = PW * 0.8 * s, PH * 0.8 * s
+    pa = a * (1 - prog(t, 4.0, 4.6))
+    draw_paper(img, cx, cy, pw, ph, alpha=pa)
 
     def ring(d, _):
-        d.rounded_rectangle((cx - pw / 2, cy - ph / 2, cx + pw / 2, cy + ph / 2), radius=18, outline=CYAN, width=8)
-        d.ellipse((cx - 110 * s, cy - 140 * s, cx + 110 * s, cy + 140 * s), outline=YELLOW, width=8)
-    overlay(img, ring, a * (1 - prog(t, 4.0, 4.6)))
-    # 结尾大字
-    k = ease_back(prog(t, 4.4, 5.0))
-    text(img, (W / 2, 700), "有用的", 170 * k, WHITE, stroke=10)
-    k2 = ease_back(prog(t, 4.7, 5.3))
-    text(img, (W / 2, 920), "无用", 240 * k2, YELLOW, stroke=12)
-    q = prog(t, 6.0, 6.5)
-    tag(img, W / 2, 1180, "你身边还有哪些“有用的无用”？", 46, CYAN, (10, 30, 40), alpha=q)
-    text(img, (W / 2, 1270), "评论区见", 46, GREY, alpha=prog(t, 6.4, 6.9), bold=False)
+        d.rounded_rectangle((cx - pw / 2, cy - ph / 2, cx + pw / 2, cy + ph / 2), radius=16, outline=CYAN, width=7)
+        d.ellipse((cx - ERX * 0.8 * s, cy - ERY * 0.8 * s, cx + ERX * 0.8 * s, cy + ERY * 0.8 * s), outline=YELLOW, width=7)
+    overlay(img, ring, pa)
+    big_title(img, ease_back(prog(t, 4.4, 5.0)), ease_back(prog(t, 4.7, 5.3)), y=400)
+    tag(img, W / 2, 680, "你身边还有哪些“有用的无用”？", 46, CYAN, (10, 30, 40), alpha=prog(t, 6.0, 6.5))
+    text(img, (W / 2, 780), "评论区见", 42, GREY, alpha=prog(t, 6.4, 6.9), bold=False)
 
 
 TIMELINE = [
@@ -598,17 +534,14 @@ def subtitle(img, t):
     for a, b, s in SUBS:
         if a <= t < b:
             al = prog(t, a, a + 0.15) * (1 - prog(t, b - 0.12, b))
-            f = font(56)
-            lines = s.split("\n")
-            wmax = max(f.getlength(l) for l in lines)
-            h = len(lines) * 72 + 30
-            cy = 1500
+            w = font(50).getlength(s)
+            cy = 975
 
             def fn(d, _):
-                d.rounded_rectangle((W / 2 - wmax / 2 - 36, cy - h / 2, W / 2 + wmax / 2 + 36, cy + h / 2),
-                                    radius=24, fill=(0, 0, 0, 150))
+                d.rounded_rectangle((W / 2 - w / 2 - 36, cy - 44, W / 2 + w / 2 + 36, cy + 44),
+                                    radius=22, fill=(0, 0, 0, 150))
             overlay(img, fn, al)
-            text(img, (W / 2, cy), s, 56, WHITE, alpha=al, spacing=16)
+            text(img, (W / 2, cy), s, 50, WHITE, alpha=al)
             break
 
 
@@ -619,8 +552,7 @@ def render_frame(bg, t):
             fn(img, t - a)
     header(img, t)
     subtitle(img, t)
-    # 翻车时屏幕抖动
-    if 20.6 <= t < 21.4:
+    if 20.6 <= t < 21.4:  # 翻车时屏幕抖动
         k = 1 - (t - 20.6) / 0.8
         dx, dy = int(math.sin(t * 90) * 22 * k), int(math.cos(t * 77) * 18 * k)
         shaken = Image.new("RGBA", (W, H), BG + (255,))
@@ -629,179 +561,62 @@ def render_frame(bg, t):
     return img.convert("RGB")
 
 
-# ---------------------------------------------------------------- 音频
+# ---------------------------------------------------------------- 可选音效轨（不含音乐）
 SR = 44100
 
 
-def synth_audio(path):
+def synth_sfx(path):
     n = int(DURATION * SR)
-    mix = np.zeros(n, dtype=np.float64)
-    bpm = 96
-    beat = 60 / bpm
-    tt = np.arange(n) / SR
+    mix = np.zeros(n)
+    rng = np.random.default_rng(1)
 
     def add(sig, start, gain=1.0):
         i = int(start * SR)
-        if i >= n:
-            return
         j = min(n, i + len(sig))
-        mix[i:j] += sig[: j - i] * gain
+        if i < n:
+            mix[i:j] += sig[: j - i] * gain
 
-    def env(L, a=0.005, r=0.2):
-        x = np.arange(int(L * SR)) / SR
-        e = np.minimum(1, x / a) * np.exp(-x / r)
-        return e
-
-    def note(freq, L, wave_="tri", a=0.02, r=0.6):
-        x = np.arange(int(L * SR)) / SR
-        if wave_ == "tri":
-            s = 2 / np.pi * np.arcsin(np.sin(2 * np.pi * freq * x))
-        else:
-            s = np.sin(2 * np.pi * freq * x)
-        return s * env(L, a, r)
-
-    def kick():
-        L = 0.35
-        x = np.arange(int(L * SR)) / SR
-        f = 120 * np.exp(-x * 18) + 45
-        ph = 2 * np.pi * np.cumsum(f) / SR
-        return np.sin(ph) * np.exp(-x * 9)
-
-    rng = np.random.default_rng(1)
+    def xs(L):
+        return np.arange(int(L * SR)) / SR
 
     def noise(L, r, hp=True):
         s = rng.standard_normal(int(L * SR))
         if hp:
             s = np.diff(s, prepend=0)
-        return s * env(L, 0.001, r)
+        x = xs(L)
+        return s * np.minimum(1, x / 0.001) * np.exp(-x / r)
 
-    def hz(m):
-        return 440 * 2 ** ((m - 69) / 12)
-
-    # 和弦：Cmaj7 Am7 Fmaj7 G6
-    chords = [[60, 64, 67, 71], [57, 60, 64, 67], [53, 57, 60, 64], [55, 59, 62, 64]]
-    basses = [36, 33, 29, 31]
-    bar = beat * 4
-    nbars = int(DURATION / bar) + 1
-    drop = (20.4, 22.0)  # 翻车时音乐静音
-    for b in range(nbars):
-        t0 = b * bar
-        ch = chords[b % 4]
-        for m in ch:
-            add(note(hz(m), bar * 1.05, "sin", a=0.08, r=1.6), t0, 0.05)
-        add(note(hz(basses[b % 4]), bar * 0.9, "tri", a=0.01, r=0.8), t0, 0.16)
-        add(note(hz(basses[b % 4]), beat * 1.2, "tri", a=0.01, r=0.3), t0 + beat * 2.5, 0.10)
-        # 简单旋律琶音
-        arp = [ch[0] + 12, ch[2] + 12, ch[1] + 12, ch[3] + 12]
-        for k in range(8):
-            if (k + b) % 3 == 0:
-                continue
-            add(note(hz(arp[k % 4]), 0.4, "tri", a=0.005, r=0.18), t0 + k * beat / 2, 0.035)
-        if b >= 1:
-            for k in range(4):
-                bt = t0 + k * beat
-                if k in (0, 2):
-                    add(kick(), bt, 0.55)
-                else:
-                    add(noise(0.2, 0.06, hp=False), bt, 0.10)
-            for k in range(8):
-                add(noise(0.05, 0.015), t0 + k * beat / 2, 0.05 if k % 2 else 0.08)
-    # 翻车段落：音乐停 + 低频 boom
-    m0, m1 = int(drop[0] * SR), int(drop[1] * SR)
-    fade = np.ones(n)
-    fade[m0:m1] = 0.0
-    ramp = int(0.4 * SR)
-    fade[m1:m1 + ramp] = np.linspace(0, 1, ramp)
-    mix *= fade
-    # 结尾淡出
-    fo = int(2.0 * SR)
-    mix[-fo:] *= np.linspace(1, 0, fo)
-
-    # ---- 配音（可选）：每句塞进对应字幕时间窗，超长就加快语速；配音期间压低音乐
-    voice_track = np.zeros(n)
-    if VOICE_ASSETS:
-        from scipy.signal import resample_poly
-        from voice import Voice, SR as VSR
-        v = Voice(VOICE_ASSETS)
-        for (a, b, _), line in zip(SUBS, VOICE_LINES):
-            room = b - a - 0.15
-            speed = 1.0
-            for _ in range(4):
-                y = v.say(line, speed=speed)
-                dur = len(y) / VSR
-                if dur <= room:
-                    break
-                speed *= room / dur * 0.98
-            y = resample_poly(y, 147, 80)  # 24k -> 44.1k
-            y = y / (np.abs(y).max() + 1e-6) * 0.9
-            i = int((a + 0.05) * SR)
-            j = min(n, i + len(y))
-            voice_track[i:j] += y[: j - i]
-            print(f"voice {a:5.1f}s speed={speed:.2f} dur={len(y)/SR:.2f}/{b-a:.2f} {line}", flush=True)
-        # 侧链压缩：配音包络 -> 音乐增益
-        k = int(0.08 * SR)
-        envv = np.convolve(np.abs(voice_track), np.ones(k) / k, mode="same")
-        envv = np.convolve((envv > 0.01).astype(float), np.ones(k * 3) / (k * 3), mode="same")
-        mix *= 1 - 0.65 * np.clip(envv, 0, 1)
-
-    # ---- 音效
     def whoosh(L=0.45):
-        s = rng.standard_normal(int(L * SR))
-        x = np.arange(len(s)) / SR
-        e = np.sin(np.pi * x / L) ** 2
-        # 简单低通：滑动平均，窗口随时间变化效果近似
-        k = 20
-        s = np.convolve(s, np.ones(k) / k, mode="same")
-        return s * e * 3
+        s = np.convolve(rng.standard_normal(int(L * SR)), np.ones(20) / 20, mode="same")
+        return s * np.sin(np.pi * xs(L) / L) ** 2 * 3
 
     def pop():
-        L = 0.12
-        x = np.arange(int(L * SR)) / SR
-        f = 900 * np.exp(-x * 25) + 300
-        return np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-x * 30)
+        x = xs(0.12)
+        return np.sin(2 * np.pi * np.cumsum(900 * np.exp(-x * 25) + 300) / SR) * np.exp(-x * 30)
 
-    def ding(f=1318.5):
-        return note(f, 1.2, "sin", 0.002, 0.5) + 0.5 * note(f * 2, 1.2, "sin", 0.002, 0.3)
+    def ding(f):
+        x = xs(1.2)
+        return (np.sin(2 * np.pi * f * x) + 0.5 * np.sin(4 * np.pi * f * x)) * np.minimum(1, x / 0.002) * np.exp(-x / 0.45)
 
     def boom():
-        L = 1.2
-        x = np.arange(int(L * SR)) / SR
-        f = 80 * np.exp(-x * 3) + 30
-        return np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-x * 2.5) + noise(L, 0.15, False) * 0.3
-
-    def snip():
-        return noise(0.06, 0.012) * 1.5
-
-    def scratch():
-        L = 0.5
-        x = np.arange(int(L * SR)) / SR
-        f = 600 * (1 - x / L) + 100
-        return np.sign(np.sin(2 * np.pi * np.cumsum(f) / SR)) * np.exp(-x * 4) * 0.4
+        x = xs(1.2)
+        return np.sin(2 * np.pi * np.cumsum(80 * np.exp(-x * 3) + 30) / SR) * np.exp(-x * 2.5) + noise(1.2, 0.15, False) * 0.3
 
     for s in (5.0, 12.0, 26.0, 35.0, 42.0, 46.0, 50.0, 54.0, 58.0):
         add(whoosh(), s - 0.2, 0.18)
     for s in (0.15, 0.5, 6.1, 9.0, 16.6, 30.3, 30.7, 31.1, 35.05, 42.1, 46.1, 50.1, 54.1, 62.4, 62.7):
         add(pop(), s, 0.25)
     for k in range(18):
-        add(snip(), 12.8 + k * 0.12, 0.35)
-    add(scratch(), 20.35, 0.5)
+        add(noise(0.06, 0.012) * 1.5, 12.8 + k * 0.12, 0.35)
     add(boom(), 20.6, 0.9)
-    add(ding(), 27.0, 0.25)
-    add(ding(1567.98), 39.2, 0.2)
-    add(ding(1046.5), 44.4, 0.2)
-    add(ding(1318.5), 52.1, 0.2)
-    add(ding(1567.98), 56.3, 0.2)
-    add(ding(2093.0), 64.0, 0.25)
-
-    mix = np.tanh(mix * 1.2) * 0.85 + voice_track * 0.75
-    mix = np.clip(mix, -1, 1)
-    pcm = (mix * 32767).astype(np.int16)
-    stereo = np.stack([pcm, pcm], axis=1)
+    for s, f in ((27.0, 1318.5), (39.2, 1568.0), (44.4, 1046.5), (52.1, 1318.5), (56.3, 1568.0), (64.0, 2093.0)):
+        add(ding(f), s, 0.22)
+    pcm = (np.tanh(mix * 1.2) * 0.85 * 32767).astype(np.int16)
     with wave.open(path, "wb") as w:
         w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(SR)
-        w.writeframes(stereo.tobytes())
+        w.writeframes(np.stack([pcm, pcm], axis=1).tobytes())
 
 
 def write_srt(path):
@@ -813,34 +628,34 @@ def write_srt(path):
         return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
     with open(path, "w", encoding="utf-8") as f:
         for i, (a, b, s) in enumerate(SUBS, 1):
-            f.write(f"{i}\n{ts(a)} --> {ts(b)}\n{s.replace(chr(10), '')}\n\n")
+            f.write(f"{i}\n{ts(a)} --> {ts(b)}\n{s}\n\n")
 
 
 def main():
-    import sys
     os.makedirs(OUT, exist_ok=True)
+    bg = make_background()
     if len(sys.argv) > 1 and sys.argv[1] == "preview":
-        bg = make_background()
         for t in map(float, sys.argv[2:]):
             render_frame(bg, t).save(os.path.join(OUT, f"preview_{t:05.1f}.png"))
         return
-    wav = os.path.join(OUT, "audio.wav")
-    synth_audio(wav)
+    wav = os.path.join(OUT, "sfx.wav")
+    synth_sfx(wav)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", wav, "-c:a", "aac", "-b:a", "160k",
+                    os.path.join(OUT, "音效_可选.m4a")], check=True)
+    os.remove(wav)
     write_srt(os.path.join(OUT, "有用的无用.srt"))
-    bg = make_background()
-    mp4 = os.path.join(OUT, "有用的无用.mp4")
+    mp4 = os.path.join(OUT, "有用的无用_横屏.mp4")
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-           "-r", str(FPS), "-i", "-", "-i", wav, "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-           "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", mp4]
+           "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+           "-pix_fmt", "yuv420p", "-movflags", "+faststart", mp4]
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     nf = int(DURATION * FPS)
     for i in range(nf):
         p.stdin.write(render_frame(bg, i / FPS).tobytes())
-        if i % 150 == 0:
+        if i % 300 == 0:
             print(f"frame {i}/{nf}", flush=True)
     p.stdin.close()
     p.wait()
-    os.remove(wav)
     print("done:", mp4)
 
 
