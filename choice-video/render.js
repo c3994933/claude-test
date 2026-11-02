@@ -56,10 +56,11 @@ const grab = (page, arg, byTime) => page.evaluate(([a, bt]) => {
     const meta = await pages[0].evaluate(() => window.META);
     fs.writeFileSync(path.join(ROOT, 'meta.json'), JSON.stringify(meta, null, 1));
     const total = meta.FPS * meta.DURATION;
-    let next = 0, done = 0; const t0 = Date.now();
+    let next = Number(rest[1] || 0), done = 0; const t0 = Date.now();
+    const last = Number(rest[2] || total);
     await Promise.all(pages.map(async page => {
       while (true) {
-        const f = next++; if (f >= total) break;
+        const f = next++; if (f >= Math.min(total, last)) break;
         const file = path.join(outDir, `f${String(f).padStart(5, '0')}.png`);
         const b64 = await grab(page, f, false);
         fs.writeFileSync(file, Buffer.from(b64, 'base64'));
