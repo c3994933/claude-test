@@ -611,6 +611,74 @@ def synth_sfx(path):
     add(boom(), 20.6, 0.9)
     for s, f in ((27.0, 1318.5), (39.2, 1568.0), (44.4, 1046.5), (52.1, 1318.5), (56.3, 1568.0), (64.0, 2093.0)):
         add(ding(f), s, 0.22)
+
+    def tone(f, L, r=0.08):
+        x = xs(L)
+        return np.sin(2 * np.pi * f * x) * np.minimum(1, x / 0.003) * np.exp(-x / r)
+
+    def sweep(f0, f1, L):
+        x = xs(L)
+        f = f0 * (f1 / f0) ** (x / L)
+        return np.sin(2 * np.pi * np.cumsum(f) / SR) * np.sin(np.pi * x / L) ** 2
+
+    def thud():
+        x = xs(0.25)
+        return np.sin(2 * np.pi * np.cumsum(140 * np.exp(-x * 20) + 50) / SR) * np.exp(-x * 18)
+
+    def pour(L):
+        s = np.convolve(rng.standard_normal(int(L * SR)), np.ones(30) / 30, mode="same")
+        x = xs(L)
+        out = s * 4 * np.minimum(1, x / 0.2) * np.minimum(1, (L - x) / 0.3)
+        for k in range(14):  # 越装越满，气泡音越来越高
+            i = int(L * SR * k / 14)
+            b = tone(500 + 60 * k, 0.05, 0.015)
+            out[i:i + len(b)] += b[: len(out) - i] * 0.5
+        return out
+
+    def chime():  # 上行三音，用于“又省又环保”
+        out = np.zeros(int(0.8 * SR))
+        for k, f in enumerate((1046.5, 1318.5, 1568.0)):
+            s = tone(f, 0.5, 0.25)
+            i = int(0.09 * k * SR)
+            out[i:i + len(s)] += s
+        return out
+
+    # 标题：纸巾落地
+    add(thud(), 1.9, 0.6)
+    # 纸巾：干活区亮起、条形图增长、摸鱼区警示哔哔
+    add(sweep(400, 900, 1.0), 6.6, 0.12)
+    for k in range(3):
+        add(tone(880, 0.12, 0.05), 8.9 + k * 0.2, 0.18)
+    add(sweep(300, 700, 1.0), 9.0, 0.12)
+    # 剪裁：四边飞走 + 成功和弦
+    add(whoosh(0.6), 15.1, 0.25)
+    add(chime(), 16.5, 0.2)
+    # 翻车：手指下落、撕裂、警报
+    add(sweep(900, 300, 1.0), 19.6, 0.12)
+    add(noise(0.25, 0.08) * 1.2, 20.6, 0.5)
+    for k in range(4):
+        add(tone(660 if k % 2 else 880, 0.18, 0.12), 21.0 + k * 0.25, 0.2)
+    # 揭晓：纸巾变大
+    add(sweep(300, 800, 0.8), 26.0, 0.14)
+    # 庄子：逐字打字声
+    n_chars = 17
+    for k in range(n_chars):
+        add(noise(0.03, 0.006) * 1.2, 36.2 + 2.8 * k / n_chars, 0.3)
+    # 杯子：倒水
+    add(pour(1.8), 42.6, 0.2)
+    # 马路：车开过
+    add(sweep(120, 70, 1.2) + whoosh(1.2) * 0.5, 46.4, 0.25)
+    # 电量：一格格掉电 + 低电量提示
+    for k in range(5):
+        add(tone(1200 - k * 150, 0.1, 0.04), 50.4 + k * 0.32, 0.18)
+    add(tone(523, 0.15, 0.08), 52.5, 0.2)
+    add(tone(392, 0.25, 0.12), 52.7, 0.2)
+    # 日程：意外块飞入并落位
+    add(whoosh(0.8), 55.2, 0.22)
+    add(thud(), 56.2, 0.6)
+    # 结尾：纸巾弹出、评论引导
+    add(pop(), 58.05, 0.25)
+    add(pop(), 64.4, 0.2)
     pcm = (np.tanh(mix * 1.2) * 0.85 * 32767).astype(np.int16)
     with wave.open(path, "wb") as w:
         w.setnchannels(2)
@@ -640,14 +708,20 @@ def main():
         return
     wav = os.path.join(OUT, "sfx.wav")
     synth_sfx(wav)
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", wav, "-c:a", "aac", "-b:a", "160k",
-                    os.path.join(OUT, "音效_可选.m4a")], check=True)
-    os.remove(wav)
     write_srt(os.path.join(OUT, "有用的无用.srt"))
     mp4 = os.path.join(OUT, "有用的无用_横屏.mp4")
+    if len(sys.argv) > 1 and sys.argv[1] == "audio":  # 只换音效，不重画画面
+        tmp = mp4 + ".tmp.mp4"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", mp4, "-i", wav, "-map", "0:v", "-map", "1:a",
+                        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", tmp],
+                       check=True)
+        os.replace(tmp, mp4)
+        os.remove(wav)
+        print("done:", mp4)
+        return
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-           "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-           "-pix_fmt", "yuv420p", "-movflags", "+faststart", mp4]
+           "-r", str(FPS), "-i", "-", "-i", wav, "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+           "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", mp4]
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     nf = int(DURATION * FPS)
     for i in range(nf):
@@ -656,6 +730,7 @@ def main():
             print(f"frame {i}/{nf}", flush=True)
     p.stdin.close()
     p.wait()
+    os.remove(wav)
     print("done:", mp4)
 
 
