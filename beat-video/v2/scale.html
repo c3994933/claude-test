@@ -1,0 +1,650 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:NS;font-weight:300;src:url(../fonts/NotoSansSC-300.ttf)}
+@font-face{font-family:NS;font-weight:500;src:url(../fonts/NotoSansSC-500.ttf)}
+@font-face{font-family:NS;font-weight:900;src:url(../fonts/NotoSansSC-900.ttf)}
+@font-face{font-family:NSerif;font-weight:900;src:url(../fonts/NotoSerifSC-900.ttf)}
+@font-face{font-family:SG;font-weight:500;src:url(../fonts/SpaceGrotesk-500.ttf)}
+@font-face{font-family:SG;font-weight:700;src:url(../fonts/SpaceGrotesk-700.ttf)}
+html,body{margin:0;background:#000}
+</style></head>
+<body><canvas id="c" width="1080" height="1920"></canvas>
+<script>
+const W = 1080, H = 1920, CX = 540, CY = 900, R0 = 330, FPS = 30;
+const CFG = window.CFG || { P: 0.66637, B0: 2.5522, T0: 2.0 };
+const P = CFG.P, B0 = CFG.B0, T0 = CFG.T0;
+const N0 = -12, KMAX = 35;                 // beats 0..35 -> 10^-12 .. 10^23
+const beatT = k => B0 + k * P;
+const DROP = beatT(12), CUT = beatT(36);   // music is cut at beat 36
+const CODA_Z = 2.4, HOLD_U = 1.3, CARD = CUT + CODA_Z + HOLD_U, END = CUT + 4.8;
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+
+// ------------------------------------------------------------ utils
+function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const smooth = (a, b, x) => { const u = clamp((x - a) / (b - a), 0, 1); return u * u * (3 - 2 * u); };
+const easeOut = u => 1 - Math.pow(1 - clamp(u, 0, 1), 4);
+const easeIO = u => { u = clamp(u, 0, 1); return u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2; };
+const rgba = (c, a) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const TAU = Math.PI * 2;
+function gauss(R) { let u = 0, v = 0; while (!u) u = R(); v = R(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(TAU * v); }
+
+function radial(x, y, r0, r1, stops) { const g = ctx.createRadialGradient(x, y, r0, x, y, r1); for (const [o, c] of stops) g.addColorStop(o, c); return g; }
+function linear(x0, y0, x1, y1, stops) { const g = ctx.createLinearGradient(x0, y0, x1, y1); for (const [o, c] of stops) g.addColorStop(o, c); return g; }
+function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, Math.max(0.1, r), 0, TAU); }
+function glow(x, y, R, col, a) {
+  if (R < 0.5 || a <= 0.003) return;
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = radial(x, y, 0, R, [[0, rgba(col, a)], [0.25, rgba(col, a * 0.45)], [0.6, rgba(col, a * 0.12)], [1, rgba(col, 0)]]);
+  ctx.fillRect(x - R, y - R, 2 * R, 2 * R); ctx.restore();
+}
+function star(x, y, size, col, a) { glow(x, y, size * 6, col, 0.55 * a); ctx.fillStyle = rgba([255, 255, 255], a); circle(x, y, size); ctx.fill(); }
+function sphere(x, y, r, light, mid, dark) {
+  r = Math.max(0.3, r); const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.05, x, y, r * 1.02);
+  g.addColorStop(0, light); g.addColorStop(0.55, mid); g.addColorStop(1, dark); ctx.fillStyle = g; circle(x, y, r); ctx.fill();
+}
+function blob(cx, cy, rx, ry, seed, n = 10, jit = 0.25, rot = 0) {
+  const R = rng(seed), pts = [];
+  for (let i = 0; i < n; i++) { const a = i / n * TAU + rot, k = 1 - jit + jit * 2 * R(); pts.push([cx + Math.cos(a) * rx * k, cy + Math.sin(a) * ry * k]); }
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n], m = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]; if (i === 0) { const l = pts[n - 1]; ctx.moveTo((l[0] + p[0]) / 2, (l[1] + p[1]) / 2); } ctx.quadraticCurveTo(p[0], p[1], m[0], m[1]); }
+  ctx.closePath();
+}
+function txt(s, x, y, font, color, align = 'center', base = 'alphabetic', ls = '0px') {
+  ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = base; ctx.letterSpacing = ls; ctx.fillText(s, x, y); ctx.letterSpacing = '0px';
+}
+let LABK = 1;
+function label(s, x, y, a, align = 'left', size = 30, col = [235, 240, 255]) { a = Math.min(a, LABK); if (a <= 0.01) return; txt(s, x, y, `500 ${size}px NS`, rgba(col, 0.92 * a), align, 'middle'); }
+function dimH(y, x1, x2, s, a) {
+  if (a <= 0.01) return; ctx.save(); ctx.strokeStyle = rgba([255, 255, 255], 0.65 * a); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.moveTo(x1, y - 12); ctx.lineTo(x1, y + 12); ctx.moveTo(x2, y - 12); ctx.lineTo(x2, y + 12); ctx.stroke();
+  txt(s, (x1 + x2) / 2, y + 22, '500 30px SG', rgba([255, 255, 255], 0.85 * a), 'center', 'top'); ctx.restore();
+}
+function dimV(x, y1, y2, s, a) {
+  if (a <= 0.01) return; ctx.save(); ctx.strokeStyle = rgba([255, 255, 255], 0.65 * a); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x, y1); ctx.lineTo(x, y2); ctx.moveTo(x - 12, y1); ctx.lineTo(x + 12, y1); ctx.moveTo(x - 12, y2); ctx.lineTo(x + 12, y2); ctx.stroke();
+  txt(s, x + 22, (y1 + y2) / 2, '500 30px SG', rgba([255, 255, 255], 0.85 * a), 'left', 'middle'); ctx.restore();
+}
+
+// ------------------------------------------------------------ textures / precomputed data
+function makeCanvas(w, h) { const k = document.createElement('canvas'); k.width = w; k.height = h; return k; }
+const GRAIN = (() => { const k = makeCanvas(256, 256), g = k.getContext('2d'), im = g.createImageData(256, 256), R = rng(9);
+  for (let i = 0; i < im.data.length; i += 4) { const v = R() * 255; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 255; } g.putImageData(im, 0, 0); return k; })();
+const GRAN = (() => { const k = makeCanvas(512, 512), g = k.getContext('2d'), R = rng(4); g.fillStyle = '#806040'; g.fillRect(0, 0, 512, 512);
+  g.filter = 'blur(3px)'; for (let i = 0; i < 1600; i++) { const v = R(); g.fillStyle = v > .5 ? 'rgba(255,240,200,0.5)' : 'rgba(60,20,0,0.5)'; g.beginPath(); g.arc(R() * 512, R() * 512, 4 + R() * 9, 0, TAU); g.fill(); } return k; })();
+const STARS = (() => { const R = rng(11), a = []; for (let i = 0; i < 700; i++) { const t = R(); a.push([(R() * 2 - 1) * 1.4, (R() * 2 - 1) * 2.0, Math.pow(R(), 3), t < .15 ? [170, 200, 255] : t < .3 ? [255, 220, 170] : [255, 255, 255], R() * TAU]); } return a; })();
+function galaxyParts(seed, n, arms, wind) {
+  const R = rng(seed), out = [];
+  for (let i = 0; i < n; i++) {
+    const u = Math.pow(R(), 0.75), arm = Math.floor(R() * arms);
+    const core = R() < 0.18;
+    let th, rad;
+    if (core) { rad = Math.abs(gauss(R)) * 0.12; th = R() * TAU; }
+    else { rad = 0.08 + 0.92 * u; th = arm / arms * TAU + wind * Math.log(rad + 0.05) + gauss(R) * 0.22 * (1 - rad * 0.4); }
+    const sc = (core ? 0.02 : 0.035) ;
+    const x = Math.cos(th) * rad + gauss(R) * sc, y = Math.sin(th) * rad + gauss(R) * sc;
+    const hot = R();
+    const col = core ? [255, 225, 170] : hot < 0.07 ? [255, 120, 170] : rad < 0.35 ? [255, 235, 200] : [175, 205, 255];
+    out.push([x, y, col, 0.35 + R() * 0.65, core ? 1.6 : 1.1 + R() * 1.2]);
+  }
+  return out;
+}
+const MW = galaxyParts(21, 7000, 4, 2.3), M31 = galaxyParts(31, 4200, 2, 2.6);
+const OORT = (() => { const R = rng(15), a = []; for (let i = 0; i < 1800; i++) { const u = R() * 2 - 1, ph = R() * TAU, rr = 0.55 + 0.45 * Math.pow(R(), 0.6), s = Math.sqrt(1 - u * u); a.push([Math.cos(ph) * s * rr, u * rr, Math.sin(ph) * s * rr]); } return a; })();
+const FIB = (() => { const a = [], n = 140, g = Math.PI * (3 - Math.sqrt(5)); for (let i = 0; i < n; i++) { const y = 1 - (i / (n - 1)) * 2, r = Math.sqrt(1 - y * y); a.push([Math.cos(g * i) * r, y, Math.sin(g * i) * r]); } return a; })();
+const CONTS = (() => { const R = rng(7), a = []; for (let i = 0; i < 9; i++) a.push([R() * TAU, (R() - 0.5) * 1.8, 0.25 + R() * 0.35, i + 40]); return a; })();
+const CLOUDS = (() => { const R = rng(8), a = []; for (let i = 0; i < 14; i++) a.push([R() * TAU, (R() - 0.5) * 2.2, 0.12 + R() * 0.2, i + 90]); return a; })();
+const WEB = (() => { const R = rng(26), nodes = []; for (let i = 0; i < 120; i++) { const a = R() * TAU, d = Math.sqrt(R()) * 0.88; nodes.push([Math.cos(a) * d, Math.sin(a) * d, R()]); }
+  const edges = []; nodes.forEach((p, i) => { const ds = nodes.map((q, j) => [Math.hypot(p[0] - q[0], p[1] - q[1]), j]).filter(x => x[1] !== i).sort((a, b) => a[0] - b[0]).slice(0, 3); ds.forEach(([d, j]) => { if (j > i) edges.push([i, j]); }); });
+  return { nodes, edges }; })();
+const CMB = (() => { const R = rng(5), a = []; let v = 0; for (let i = 0; i < 240; i++) { v = 0.7 * v + 0.3 * (R() * 2 - 1); a.push(v); } return a; })();
+const VIRGO = (() => { const R = rng(24), a = []; for (let i = 0; i < 520; i++) a.push([gauss(R) * 0.16, gauss(R) * 0.14, R()]); return a; })();
+const FIELDG = (() => { const R = rng(23), a = []; for (let i = 0; i < 260; i++) a.push([(R() * 2 - 1) * 1.6, (R() * 2 - 1) * 2.4, R()]); return a; })();
+const ARM = (() => { const R = rng(20), a = []; for (let i = 0; i < 3200; i++) { const x = (R() * 2 - 1) * 1.6, w = gauss(R) * 0.22; a.push([x, x * 0.45 + w, R(), R()]); } return a; })();
+const SANDP = (() => { const R = rng(3), a = []; for (let i = 0; i < 13; i++) { const t = i / 13 * TAU; a.push([Math.cos(t) * (0.75 + 0.25 * R()), Math.sin(t) * (0.7 + 0.25 * R())]); } return a; })();
+
+// ------------------------------------------------------------ facts
+const FACTS = {
+  '-12': ['原子内部', '中间那个小亮点，就是原子核'], '-11': ['电子云', '电子没有固定轨道，只有“概率云”'], '-10': ['氢原子', '约 0.1 纳米，内部几乎全是空的'],
+  '-9': ['DNA 双螺旋', '直径约 2 纳米，写着生命的代码'], '-8': ['核糖体', '约 25 纳米，细胞里的蛋白质工厂'], '-7': ['流感病毒', '约 100 纳米，普通光学显微镜看不见'],
+  '-6': ['大肠杆菌', '约 2 微米长，靠鞭毛游泳'], '-5': ['红细胞', '直径约 7 微米，成熟后没有细胞核'], '-4': ['头发丝', '直径约 0.07 毫米'], '-3': ['沙粒', '约 1 毫米'],
+  '-2': ['蜜蜂', '约 1.5 厘米，翅膀每秒振动约 200 次'], '-1': ['手机', '约 15 厘米'], '0': ['你', '约 1.7 米 · 从这里出发'], '1': ['公交车', '约 12 米'],
+  '2': ['足球场', '长约 105 米'], '3': ['哈利法塔', '828 米，目前世界最高建筑'], '4': ['珠穆朗玛峰', '海拔 8849 米'], '5': ['卡门线', '海拔 100 公里，常用的太空边界'],
+  '6': ['月球', '直径约 3474 公里'], '7': ['地球', '直径约 12742 公里'], '8': ['地月距离', '约 38.4 万公里，光要走 1.3 秒'], '9': ['太阳', '直径约 139 万公里，能装下约 130 万个地球'],
+  '10': ['光速 33 秒', '光每秒约走 30 万公里'], '11': ['地球轨道', '日地距离 1.5 亿公里，光走 8 分 20 秒'], '12': ['土星轨道', '距太阳约 14 亿公里'],
+  '13': ['旅行者 1 号', '1977 年发射，已飞出约 250 亿公里'], '14': ['赛德娜', '远日点约 1400 亿公里，公转一圈约 1 万年'], '15': ['奥尔特云', '推测中彗星的老家'],
+  '16': ['1 光年', '约 9.46 万亿公里'], '17': ['比邻星', '离太阳最近的恒星，约 4.2 光年'], '18': ['昴星团', '约 440 光年，肉眼可见的“七姐妹”'],
+  '19': ['猎户座大星云', '约 1344 光年，恒星的摇篮'], '20': ['银河系旋臂', '太阳距银河系中心约 2.6 万光年'], '21': ['银河系', '直径约 10 万光年，上千亿颗恒星'],
+  '22': ['仙女座星系', '约 250 万光年，正以约 110 km/s 靠近我们'], '23': ['本星系群', '80 多个星系组成的“小家庭”'], '24': ['室女座星系团', '约 5400 万光年外，上千个星系'],
+  '25': ['拉尼亚凯亚', '我们所在的超星系团，直径约 5 亿光年'], '26': ['可观测宇宙', '直径约 930 亿光年'],
+};
+const ZONES = [[-12, -4.5, '微观', [80, 230, 220]], [-4.5, 4.5, '人类尺度', [255, 196, 110]], [4.5, 8.5, '地球', [110, 180, 255]],
+  [8.5, 15.5, '太阳系', [255, 160, 90]], [15.5, 22.5, '银河', [200, 150, 255]], [22.5, 26, '宇宙', [255, 120, 190]]];
+const zoneCol = z => { for (const q of ZONES) if (z >= q[0] && z < q[1] + 1e-3) return q[3]; return ZONES[ZONES.length - 1][3]; };
+
+// ------------------------------------------------------------ timeline
+function Z(t) {
+  if (t < beatT(0)) return N0 - 1.25 + 0.25 * clamp((t - T0) / (beatT(0) - T0), 0, 1);
+  if (t < CUT) { const k = Math.min(KMAX, Math.floor((t - B0) / P)), dt = t - beatT(k), n = N0 + k; return (n - 1) + 0.94 * easeOut(dt / 0.32) + 0.06 * Math.min(1, dt / P); }
+  return 23 + 3 * easeIO((t - CUT) / CODA_Z) + 0.06 * smooth(CUT + CODA_Z, END, t);
+}
+const BEATS = []; for (let k = 0; k <= KMAX; k++) BEATS.push(beatT(k));
+function since(t, ev) { let b = null; for (const e of ev) { if (e <= t) b = e; else break; } return b === null ? null : t - b; }
+function pulse(t, ev, tau) { const d = since(t, ev); return d === null ? 0 : Math.exp(-d / tau); }
+
+// ------------------------------------------------------------ objects (ctx is translated to the view centre)
+const O = {};
+O[-10] = { up: 2.6, f(r, t, a, ann) {
+  const damp = Math.min(1, Math.pow(1.6 * R0 / r, 0.35));
+  ctx.fillStyle = radial(0, 0, 0, r, [[0, `rgba(120,235,255,${0.55 * damp})`], [0.3, `rgba(40,170,230,${0.38 * damp})`], [0.65, `rgba(20,90,170,${0.14 * damp})`], [1, 'rgba(10,40,90,0)']]);
+  ctx.fillRect(-W, -H, 2 * W, 2 * H);
+  if (r < 6000) for (let i = 0; i < 3; i++) {
+    const ang = t * 0.5 + i * Math.PI / 3; ctx.save(); ctx.rotate(ang);
+    ctx.strokeStyle = 'rgba(170,235,255,0.28)'; ctx.lineWidth = Math.max(1.5, r * 0.004); ctx.beginPath(); ctx.ellipse(0, 0, r * 0.88, r * 0.3, 0, 0, TAU); ctx.stroke();
+    const th = t * 2.6 + i * 2.1;
+    for (let j = 10; j >= 0; j--) { const tt = th - j * 0.05; glow(Math.cos(tt) * r * 0.88, Math.sin(tt) * r * 0.3, Math.max(8, r * 0.03) * (1 - j / 14), [150, 240, 255], 0.5 * (1 - j / 11)); }
+    ctx.fillStyle = '#eaffff'; circle(Math.cos(th) * r * 0.88, Math.sin(th) * r * 0.3, Math.max(3, r * 0.008)); ctx.fill(); ctx.restore();
+  }
+  const nr = Math.max(9, r * 1e-5);
+  glow(0, 0, nr * 7, [255, 170, 90], 0.9); sphere(0, 0, nr, '#fff1d6', '#ff8a4c', '#a32c12');
+  const near = smooth(-11.2, -11.8, -Math.log10(r / R0) - 10) ; // only at deepest zoom
+  if (r > R0 * 30) { ctx.strokeStyle = rgba([255, 255, 255], 0.6 * a); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(nr * 1.6, -nr * 1.6); ctx.lineTo(130, -130); ctx.lineTo(230, -130); ctx.stroke(); LABK = 1; label('原子核（一个质子）', 245, -130, a * smooth(R0 * 30, R0 * 60, r)); }
+  dimH(r * 1.06, -r * 0.9, r * 0.9, '≈ 0.1 nm', ann);
+} };
+O[-9] = { f(r, t, a, ann) {
+  ctx.save(); ctx.rotate(-0.22);
+  const A = r * 0.9, per = r * 3.4, ph = t * 2.0, L = Math.min(W * 1.2, r * 9), step = Math.max(4, per / 22);
+  const pts = [];
+  for (let x = -L; x <= L; x += step) { const th = x / per * TAU + ph; pts.push([x, Math.sin(th) * A, Math.cos(th), Math.sin(th + Math.PI) * A, Math.cos(th + Math.PI)]); }
+  const br = Math.max(1.5, r * 0.13);
+  const ball = (x, y, d, col) => { const k = 0.55 + 0.45 * (d + 1) / 2; sphere(x, y, br * (0.8 + 0.2 * (d + 1) / 2), rgba(col.map(v => Math.min(255, v + 90)), 1), rgba(col.map(v => v * k), 1), rgba(col.map(v => v * k * 0.4), 1)); };
+  for (const p of pts) { if (p[2] < 0) ball(p[0], p[1], p[2], [70, 140, 255]); if (p[4] < 0) ball(p[0], p[3], p[4], [255, 90, 160]); }
+  const PAIR = [[[255, 200, 70], [90, 220, 140]], [[255, 110, 80], [150, 130, 255]]];
+  pts.forEach((p, i) => { if (i % 2) return; const cc = PAIR[(i / 2) % 2 | 0]; ctx.lineWidth = Math.max(1, br * 0.55); ctx.lineCap = 'round';
+    ctx.strokeStyle = rgba(cc[0], 0.9); ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0], (p[1] + p[3]) / 2); ctx.stroke();
+    ctx.strokeStyle = rgba(cc[1], 0.9); ctx.beginPath(); ctx.moveTo(p[0], (p[1] + p[3]) / 2); ctx.lineTo(p[0], p[3]); ctx.stroke(); });
+  for (const p of pts) { if (p[2] >= 0) ball(p[0], p[1], p[2], [70, 140, 255]); if (p[4] >= 0) ball(p[0], p[3], p[4], [255, 90, 160]); }
+  ctx.restore();
+  dimV(r * 1.15, -r * 0.9, r * 0.9, '2 nm', ann);
+} };
+O[-8] = { f(r, t, a, ann) {
+  ctx.lineWidth = Math.max(1, r * 0.04); ctx.strokeStyle = 'rgba(255,220,140,0.9)'; ctx.beginPath();
+  for (let x = -W; x < W; x += 6) { const y = r * 0.18 + Math.sin(x / r * 3 + t) * r * 0.04; x === -W ? ctx.moveTo(x, y) : ctx.lineTo(x, y); } ctx.stroke();
+  blob(0, -r * 0.18, r * 0.88, r * 0.62, 12, 11, 0.12); ctx.fillStyle = radial(-r * 0.3, -r * 0.5, r * 0.05, r * 1.1, [[0, '#e3ccff'], [0.45, '#9b6cf0'], [1, '#3c1f8f']]); ctx.fill();
+  blob(0, r * 0.52, r * 0.62, r * 0.36, 13, 10, 0.12); ctx.fillStyle = radial(-r * 0.2, r * 0.35, r * 0.05, r * 0.8, [[0, '#cfe1ff'], [0.5, '#5f8cf0'], [1, '#1d2f8a']]); ctx.fill();
+  for (let k = 0; k < 16; k++) { const x = r * 0.15 + k * r * 0.11, y = -r * 0.72 - Math.sin(k * 1.2 + t * 3) * r * 0.08 - k * r * 0.05;
+    sphere(x, y, r * 0.055, '#fff', ['#ffb86b', '#7dffc8', '#ff7aa8', '#ffe66b'][k % 4], '#333'); }
+  dimH(r * 1.0, -r * 0.88, r * 0.88, '25 nm', ann);
+} };
+O[-7] = { f(r, t, a, ann) {
+  const rb = r * 0.78, rot = t * 0.25;
+  const P3 = FIB.map(([x, y, z]) => [x * Math.cos(rot) + z * Math.sin(rot), y, -x * Math.sin(rot) + z * Math.cos(rot)]);
+  ctx.lineCap = 'round';
+  for (const [x, y, z] of P3) { if (Math.abs(z) > 0.35) continue; const d = Math.hypot(x, y) || 1, ux = x / d, uy = y / d;
+    ctx.strokeStyle = '#ffb36b'; ctx.lineWidth = Math.max(1, r * 0.03); ctx.beginPath(); ctx.moveTo(ux * rb * 0.95, uy * rb * 0.95); ctx.lineTo(ux * r, uy * r); ctx.stroke();
+    sphere(ux * r, uy * r, r * 0.05, '#ffe2c4', '#ff7d4d', '#a3301a'); }
+  ctx.fillStyle = radial(-rb * 0.35, -rb * 0.35, rb * 0.05, rb * 1.1, [[0, '#ffc19a'], [0.45, '#d9573a'], [1, '#5c140c']]); circle(0, 0, rb); ctx.fill();
+  for (const [x, y, z] of P3) { if (z < 0.3) continue; sphere(x * rb, y * rb, r * 0.045 * z, '#ffe9d6', '#ff9a6b', '#9b3a20'); }
+  dimH(r * 1.12, -r, r, '100 nm', ann);
+} };
+O[-6] = { f(r, t, a, ann) {
+  ctx.save(); ctx.rotate(-0.12);
+  for (let j = 0; j < 5; j++) { ctx.strokeStyle = `rgba(190,255,190,${0.45})`; ctx.lineWidth = Math.max(1, r * 0.012); ctx.beginPath();
+    for (let k = 0; k <= 60; k++) { const x = r * 0.95 + k * r * 0.045, y = (j - 2) * r * 0.12 + Math.sin(k * 0.45 - t * 10 + j) * r * 0.07 * (k / 60 + 0.3); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.stroke(); }
+  const R = rng(66); ctx.strokeStyle = 'rgba(200,255,200,0.35)'; ctx.lineWidth = Math.max(1, r * 0.006);
+  for (let k = 0; k < 70; k++) { const th = R() * TAU, x = Math.cos(th) * r * 0.98, y = Math.sin(th) * r * 0.4; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x * 1.08, y * 1.25); ctx.stroke(); }
+  ctx.beginPath(); ctx.roundRect(-r, -r * 0.38, 2 * r, r * 0.76, r * 0.38);
+  ctx.fillStyle = linear(0, -r * 0.38, 0, r * 0.38, [[0, '#b9f5a8'], [0.35, '#55b86a'], [1, '#1b5530']]); ctx.fill();
+  ctx.strokeStyle = 'rgba(220,255,220,0.6)'; ctx.lineWidth = Math.max(1, r * 0.015); ctx.stroke();
+  ctx.strokeStyle = 'rgba(30,90,50,0.6)'; ctx.lineWidth = Math.max(1, r * 0.03); ctx.beginPath();
+  for (let k = 0; k <= 40; k++) { const x = -r * 0.6 + k * r * 0.03, y = Math.sin(k * 0.8) * r * 0.1; k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.beginPath(); ctx.roundRect(-r * 0.8, -r * 0.3, r * 1.6, r * 0.1, r * 0.05); ctx.fill();
+  ctx.restore();
+  dimH(r * 0.75, -r, r, '2 μm', ann);
+} };
+O[-5] = { f(r, t, a, ann) {
+  const cells = [[-1.7, -1.3, 0.95, 0.75, 0.4], [1.8, 1.0, 1.0, 0.55, -0.6], [-1.3, 1.7, 0.85, 0.9, 1.0], [1.4, -1.8, 0.95, 0.6, 2.0], [0.2, 2.6, 0.9, 0.8, 0.3], [0, 0, 1, 1, 0]];
+  for (const [ox, oy, k, sy, rot] of cells) { ctx.save(); ctx.translate(ox * r, oy * r); ctx.rotate(rot + t * 0.05); ctx.scale(1, sy); const rr = r * k;
+    ctx.fillStyle = radial(0, 0, 0, rr * 1.15, [[0, 'rgba(0,0,0,0.35)'], [1, 'rgba(0,0,0,0)']]); circle(rr * 0.08, rr * 0.12, rr * 1.12); ctx.fill();
+    ctx.fillStyle = radial(0, 0, 0, rr, [[0, '#7a0c1a'], [0.42, '#a6141f'], [0.72, '#ec4a4f'], [0.9, '#c21f2b'], [1, '#7c0d17']]); circle(0, 0, rr); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,190,190,0.35)'; ctx.lineWidth = Math.max(1, rr * 0.04); ctx.beginPath(); ctx.arc(0, 0, rr * 0.8, 3.6, 4.8); ctx.stroke(); ctx.restore(); }
+  dimH(r * 1.12, -r, r, '7 μm', ann);
+} };
+O[-4] = { fast: true, f(r, t, a, ann) {
+  const hw = r * 0.7;
+  ctx.fillStyle = linear(-hw, 0, hw, 0, [[0, '#24130a'], [0.18, '#6e4325'], [0.32, '#c99060'], [0.42, '#9a6338'], [0.8, '#5a341b'], [1, '#1d0f07']]);
+  ctx.fillRect(-hw, -H, 2 * hw, 2 * H);
+  const step = Math.max(6, hw * 0.32); let y = -H + ((t * hw * 0.6) % step);
+  ctx.lineWidth = Math.max(1, r * 0.012);
+  for (; y < H; y += step) { ctx.strokeStyle = 'rgba(255,215,170,0.35)'; ctx.beginPath(); ctx.moveTo(-hw, y + step * 0.5); ctx.quadraticCurveTo(0, y - step * 0.25, hw, y + step * 0.5); ctx.stroke();
+    ctx.strokeStyle = 'rgba(30,15,5,0.35)'; ctx.beginPath(); ctx.moveTo(-hw, y + step * 0.6); ctx.quadraticCurveTo(0, y - step * 0.15, hw, y + step * 0.6); ctx.stroke(); }
+  dimH(r * 1.0, -hw, hw, '70 μm', ann * 0.9);
+} };
+O[-3] = { f(r, t, a, ann) {
+  const pts = SANDP.map(([x, y]) => [x * r * 0.92, y * r * 0.85]), cx0 = -r * 0.15, cy0 = -r * 0.12;
+  for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length], ang = Math.atan2((p[1] + q[1]) / 2, (p[0] + q[0]) / 2);
+    const lit = 0.5 + 0.5 * Math.cos(ang - (-2.4)); const col = [150 + 95 * lit, 120 + 90 * lit, 75 + 70 * lit];
+    ctx.fillStyle = rgba(col, 1); ctx.beginPath(); ctx.moveTo(cx0, cy0); ctx.lineTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.closePath(); ctx.fill(); ctx.strokeStyle = rgba(col, 1); ctx.lineWidth = 1; ctx.stroke(); }
+  ctx.fillStyle = 'rgba(255,250,235,0.35)'; ctx.beginPath(); ctx.moveTo(cx0, cy0); ctx.lineTo(pts[8][0], pts[8][1]); ctx.lineTo(pts[9][0], pts[9][1]); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,240,210,0.6)'; ctx.lineWidth = Math.max(1, r * 0.01); ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.stroke();
+  dimH(r * 1.05, -r * 0.92, r * 0.92, '1 mm', ann);
+} };
+O[-2] = { f(r, t, a, ann) {
+  const flap = Math.sin(t * 50);
+  for (let k = 0; k < 4; k++) { const ang = -0.9 + (k / 3) * 0.9; ctx.save(); ctx.translate(-r * 0.05, -r * 0.32); ctx.rotate(ang); ctx.fillStyle = 'rgba(220,240,255,0.16)'; ctx.beginPath(); ctx.ellipse(r * 0.05, -r * 0.42, r * 0.22, r * 0.48, 0.3, 0, TAU); ctx.fill(); ctx.restore(); }
+  ctx.save(); ctx.translate(-r * 0.05, -r * 0.32); ctx.rotate(-0.45 + flap * 0.45); ctx.fillStyle = 'rgba(225,242,255,0.45)'; ctx.beginPath(); ctx.ellipse(r * 0.05, -r * 0.42, r * 0.22, r * 0.48, 0.3, 0, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(80,90,110,0.5)'; ctx.lineWidth = Math.max(1, r * 0.006); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(r * 0.1, -r * 0.8); ctx.moveTo(0, 0); ctx.lineTo(r * 0.22, -r * 0.6); ctx.stroke(); ctx.restore();
+  ctx.save(); ctx.beginPath(); ctx.ellipse(-r * 0.45, r * 0.05, r * 0.55, r * 0.36, -0.12, 0, TAU); ctx.clip();
+  ctx.fillStyle = '#f2b51d'; ctx.fillRect(-r * 1.1, -r * 0.5, r * 1.2, r); ctx.fillStyle = '#1d140a';
+  for (let k = 0; k < 4; k++) ctx.fillRect(-r * 0.95 + k * r * 0.26, -r * 0.5, r * 0.11, r);
+  ctx.fillStyle = radial(-r * 0.45, -r * 0.15, r * 0.05, r * 0.6, [[0, 'rgba(255,255,255,0.35)'], [0.6, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0.45)']]); ctx.fillRect(-r * 1.1, -r * 0.5, r * 1.2, r); ctx.restore();
+  ctx.fillStyle = radial(r * 0.1, -r * 0.05, r * 0.02, r * 0.32, [[0, '#b47a2c'], [1, '#4a2c0c']]); circle(r * 0.12, 0, r * 0.28); ctx.fill();
+  const R = rng(5); ctx.strokeStyle = 'rgba(230,180,90,0.6)'; ctx.lineWidth = Math.max(1, r * 0.008);
+  for (let k = 0; k < 80; k++) { const th = R() * TAU, x = r * 0.12 + Math.cos(th) * r * 0.27, y = Math.sin(th) * r * 0.27; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(th) * r * 0.05, y + Math.sin(th) * r * 0.05); ctx.stroke(); }
+  ctx.fillStyle = radial(r * 0.55, -r * 0.05, r * 0.02, r * 0.26, [[0, '#4a3a2a'], [1, '#0d0904']]); circle(r * 0.56, r * 0.02, r * 0.22); ctx.fill();
+  ctx.fillStyle = radial(r * 0.62, -r * 0.06, r * 0.01, r * 0.12, [[0, '#6b5a4a'], [1, '#120c06']]); ctx.beginPath(); ctx.ellipse(r * 0.62, -r * 0.02, r * 0.08, r * 0.13, 0.3, 0, TAU); ctx.fill();
+  ctx.strokeStyle = '#1a1208'; ctx.lineWidth = Math.max(1, r * 0.02); ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(r * 0.66, -r * 0.16); ctx.quadraticCurveTo(r * 0.85, -r * 0.45, r * 0.95, -r * 0.42); ctx.stroke();
+  for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.moveTo(r * (0.0 + k * 0.12), r * 0.22); ctx.quadraticCurveTo(r * (-0.05 + k * 0.12), r * 0.45, r * (-0.15 + k * 0.15), r * 0.55); ctx.stroke(); }
+  dimH(r * 0.78, -r, r * 0.95, '1.5 cm', ann);
+} };
+O[-1] = { f(r, t, a, ann) {
+  const w = r * 0.47, h = r * 0.97;
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.roundRect(-w + r * 0.04, -h + r * 0.06, 2 * w, 2 * h, r * 0.13); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(-w, -h, 2 * w, 2 * h, r * 0.13); ctx.fillStyle = linear(-w, -h, w, h, [[0, '#5a5f6b'], [0.5, '#262931'], [1, '#121318']]); ctx.fill();
+  ctx.strokeStyle = 'rgba(220,225,240,0.5)'; ctx.lineWidth = Math.max(1, r * 0.008); ctx.stroke();
+  ctx.save(); ctx.beginPath(); ctx.roundRect(-w * 0.9, -h * 0.95, w * 1.8, h * 1.9, r * 0.1); ctx.clip();
+  ctx.fillStyle = linear(0, -h, 0, h, [[0, '#0b1636'], [1, '#26117a']]); ctx.fillRect(-w, -h, 2 * w, 2 * h);
+  const pb = pulse(t, BEATS, 0.12);
+  for (let k = 0; k < 9; k++) { const bh = h * (0.12 + 0.35 * Math.abs(Math.sin(k * 1.7 + t * 6)) * (0.5 + pb)); ctx.fillStyle = linear(0, h * 0.4 - bh, 0, h * 0.4, [[0, '#ff7ad9'], [1, '#6f8bff']]);
+    ctx.beginPath(); ctx.roundRect(-w * 0.72 + k * w * 0.165, h * 0.4 - bh, w * 0.1, bh, w * 0.05); ctx.fill(); }
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = `500 ${Math.max(6, r * 0.09)}px NS`; ctx.textAlign = 'center'; ctx.fillText('一拍 ×10', 0, -h * 0.45);
+  ctx.fillStyle = linear(-w, -h, w, 0, [[0, 'rgba(255,255,255,0.14)'], [0.5, 'rgba(255,255,255,0.0)']]); ctx.fillRect(-w, -h, 2 * w, 2 * h); ctx.restore();
+  ctx.fillStyle = '#000'; ctx.beginPath(); ctx.roundRect(-w * 0.28, -h * 0.9, w * 0.56, h * 0.07, h * 0.035); ctx.fill();
+  dimV(w + r * 0.18, -h, h, '15 cm', ann);
+} };
+O[0] = { f(r, t, a, ann) {
+  const h = r * 1.7, top = -h / 2, u = h / 8;
+  ctx.fillStyle = radial(0, h / 2, 0, u * 2.2, [[0, 'rgba(0,0,0,0.5)'], [1, 'rgba(0,0,0,0)']]); ctx.save(); ctx.scale(1, 0.18); circle(0, h / 2 / 0.18, u * 2.2); ctx.restore(); ctx.fill();
+  const body = linear(0, top, 0, h / 2, [[0, '#fff3e2'], [0.5, '#ffd3a0'], [1, '#f39a52']]);
+  ctx.strokeStyle = body; ctx.fillStyle = body; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  circle(0, top + u * 0.55, u * 0.52); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-u * 0.8, top + u * 1.45); ctx.quadraticCurveTo(0, top + u * 1.25, u * 0.8, top + u * 1.45); ctx.lineTo(u * 0.62, top + u * 4.1); ctx.lineTo(-u * 0.62, top + u * 4.1); ctx.closePath(); ctx.fill();
+  ctx.lineWidth = u * 0.42;
+  ctx.beginPath(); ctx.moveTo(-u * 0.32, top + u * 4.0); ctx.lineTo(-u * 0.38, top + u * 7.75); ctx.moveTo(u * 0.32, top + u * 4.0); ctx.lineTo(u * 0.38, top + u * 7.75); ctx.stroke();
+  ctx.lineWidth = u * 0.32;
+  ctx.beginPath(); ctx.moveTo(-u * 0.72, top + u * 1.6); ctx.quadraticCurveTo(-u * 1.05, top + u * 2.8, -u * 0.95, top + u * 4.0); ctx.stroke();
+  const wv = Math.sin(t * 8) * 0.3, ex = u * 1.25, ey = top + u * 2.35, hx = ex + Math.cos(-1.35 + wv) * u * 1.25, hy = ey + Math.sin(-1.35 + wv) * u * 1.25;
+  ctx.beginPath(); ctx.moveTo(u * 0.72, top + u * 1.6); ctx.lineTo(ex, ey); ctx.lineTo(hx, hy); ctx.stroke();
+  glow(0, 0, h * 0.9, [255, 200, 140], 0.12);
+  dimV(-u * 2.6, top, h / 2, '1.7 m', ann);
+} };
+O[1] = { f(r, t, a, ann) {
+  const w = r, h = r * 0.27, gy = h + h * 0.55;
+  ctx.fillStyle = radial(0, gy, 0, w * 1.1, [[0, 'rgba(0,0,0,0.5)'], [1, 'rgba(0,0,0,0)']]); ctx.save(); ctx.scale(1, 0.08); circle(0, gy / 0.08, w * 1.1); ctx.restore(); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(-w, -h, 2 * w, 2 * h, [h * 0.35, h * 0.35, h * 0.12, h * 0.12]);
+  ctx.fillStyle = linear(0, -h, 0, h, [[0, '#ff8a7a'], [0.25, '#e8333a'], [1, '#8e121c']]); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(-w, h * 0.25, 2 * w, h * 0.12);
+  for (let k = 0; k < 8; k++) { const x = -w * 0.86 + k * w * 0.215; ctx.beginPath(); ctx.roundRect(x, -h * 0.72, w * 0.18, h * 0.75, h * 0.08);
+    ctx.fillStyle = linear(x, -h * 0.72, x + w * 0.18, 0, [[0, '#cfe8ff'], [0.45, '#5b7fae'], [0.5, '#2b3f63'], [1, '#1a2740']]); ctx.fill(); }
+  ctx.fillStyle = '#16202f'; ctx.beginPath(); ctx.roundRect(w * 0.88, -h * 0.72, w * 0.1, h * 1.5, h * 0.05); ctx.fill();
+  glow(w * 0.98, h * 0.55, h * 0.6, [255, 230, 160], 0.7);
+  for (const wx of [-0.68, 0.62]) { const x = wx * w; sphere(x, h * 1.05, h * 0.45, '#555', '#1d1d22', '#050506'); ctx.fillStyle = radial(x, h * 1.05, 0, h * 0.24, [[0, '#e6e6ea'], [1, '#7a7a85']]); circle(x, h * 1.05, h * 0.22); ctx.fill(); }
+  dimH(gy + h * 0.6, -w, w, '12 m', ann);
+} };
+O[2] = { f(r, t, a, ann) {
+  const w = r, h = r * 0.65;
+  ctx.fillStyle = radial(0, 0, h, w * 1.45, [[0, '#3a3f52'], [0.6, '#22263a'], [1, 'rgba(20,22,35,0)']]); ctx.beginPath(); ctx.ellipse(0, 0, w * 1.4, h * 1.75, 0, 0, TAU); ctx.fill();
+  ctx.lineWidth = Math.max(1, r * 0.012);
+  for (let k = 0; k < 9; k++) { ctx.strokeStyle = k % 2 ? 'rgba(90,100,140,0.6)' : 'rgba(160,60,80,0.45)'; ctx.beginPath(); ctx.ellipse(0, 0, w * (1.12 + k * 0.03), h * (1.38 + k * 0.04), 0, 0, TAU); ctx.stroke(); }
+  for (let k = 0; k < 12; k++) { const x0 = -w + k * w / 6; ctx.fillStyle = k % 2 ? '#2f8f45' : '#3aa552'; ctx.fillRect(x0, -h, w / 6 + 1, 2 * h); }
+  ctx.fillStyle = radial(0, 0, 0, w * 1.2, [[0, 'rgba(255,255,255,0.12)'], [1, 'rgba(0,0,0,0.25)']]); ctx.fillRect(-w, -h, 2 * w, 2 * h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)'; ctx.lineWidth = Math.max(1, r * 0.007);
+  ctx.strokeRect(-w, -h, 2 * w, 2 * h); ctx.beginPath(); ctx.moveTo(0, -h); ctx.lineTo(0, h); ctx.stroke(); circle(0, 0, r * 0.174); ctx.stroke();
+  for (const s of [-1, 1]) { ctx.strokeRect(s > 0 ? w - r * 0.314 : -w, -r * 0.384, r * 0.314, r * 0.768); ctx.strokeRect(s > 0 ? w - r * 0.105 : -w, -r * 0.175, r * 0.105, r * 0.35); }
+  for (const [x, y] of [[-1.2, -1.45], [1.2, -1.45], [-1.2, 1.45], [1.2, 1.45]]) glow(x * w * 0.85, y * h * 0.95, r * 0.35, [255, 250, 220], 0.5);
+  dimH(h + r * 0.12, -w, w, '105 m', ann);
+} };
+O[3] = { f(r, t, a, ann) {
+  const hh = r * 1.66, base = hh / 2;
+  const R = rng(33);
+  for (let k = 0; k < 70; k++) { const x = (R() * 2 - 1) * r * 1.8, bh = r * (0.03 + 0.12 * R() * R()), bw = r * (0.03 + 0.05 * R()); ctx.fillStyle = linear(x, base - bh, x, base, [[0, '#2b3350'], [1, '#121626']]); ctx.fillRect(x, base - bh, bw, bh);
+    if (bh > r * 0.06) { ctx.fillStyle = 'rgba(255,220,150,0.7)'; for (let j = 0; j < 4; j++) ctx.fillRect(x + bw * 0.3, base - bh + j * bh * 0.22 + bh * 0.1, Math.max(1, bw * 0.15), Math.max(1, bh * 0.05)); } }
+  const steps = [[0.13, 0], [0.12, 0.12], [0.105, 0.25], [0.09, 0.38], [0.075, 0.5], [0.06, 0.6], [0.045, 0.7], [0.03, 0.78], [0.018, 0.86], [0.006, 0.93], [0.002, 1.0]];
+  ctx.beginPath(); ctx.moveTo(-steps[0][0] * r, base);
+  steps.forEach(([w, y], i) => { ctx.lineTo(-w * r, base - y * hh); if (i < steps.length - 1) ctx.lineTo(-w * r, base - steps[i + 1][1] * hh); });
+  for (let i = steps.length - 1; i >= 0; i--) { const [w, y] = steps[i]; ctx.lineTo(w * r, base - (i < steps.length - 1 ? steps[i + 1][1] : 1) * hh); ctx.lineTo(w * r, base - y * hh); }
+  ctx.closePath(); ctx.fillStyle = linear(-0.13 * r, 0, 0.13 * r, 0, [[0, '#f2f6ff'], [0.35, '#a9bad6'], [0.55, '#6d7f9f'], [1, '#2c3650']]); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
+  for (let y = 0; y < 0.9; y += 0.02) { const wid = 0.13 - y * 0.13; ctx.beginPath(); ctx.moveTo(-wid * r, base - y * hh); ctx.lineTo(wid * r, base - y * hh); ctx.stroke(); }
+  glow(0, base - hh, Math.max(10, r * 0.05), [255, 60, 60], 0.6 + 0.4 * Math.sin(t * 6));
+  ctx.strokeStyle = 'rgba(160,170,200,0.4)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-W, base); ctx.lineTo(W, base); ctx.stroke();
+  dimV(r * 0.35, base - hh, base, '828 m', ann);
+} };
+O[4] = { f(r, t, a, ann) {
+  const base = r * 0.55;
+  const range = (seed, amp, yo, col, n) => { const R = rng(seed); ctx.beginPath(); ctx.moveTo(-W * 2, base); for (let i = 0; i <= n; i++) { const x = -r * 2.2 + i / n * r * 4.4; ctx.lineTo(x, base - yo - R() * amp); } ctx.lineTo(W * 2, base); ctx.closePath(); ctx.fillStyle = col; ctx.fill(); };
+  range(41, r * 0.35, r * 0.25, 'rgba(120,140,190,0.45)', 18);
+  ctx.beginPath(); ctx.moveTo(-r * 1.5, base); ctx.lineTo(-r * 0.6, base - r * 0.55); ctx.lineTo(-r * 0.25, base - r * 0.45); ctx.lineTo(r * 0.05, base - r * 0.98); ctx.lineTo(r * 0.45, base - r * 0.55); ctx.lineTo(r * 0.8, base - r * 0.62); ctx.lineTo(r * 1.6, base); ctx.closePath();
+  ctx.fillStyle = linear(-r, 0, r, 0, [[0, '#8f9dbf'], [0.52, '#c6d0e6'], [0.53, '#56617f'], [1, '#2c3450']]); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-r * 0.32, base - r * 0.62); ctx.lineTo(r * 0.05, base - r * 0.98); ctx.lineTo(r * 0.36, base - r * 0.64); ctx.lineTo(r * 0.2, base - r * 0.7); ctx.lineTo(r * 0.05, base - r * 0.62); ctx.lineTo(-r * 0.12, base - r * 0.7); ctx.closePath();
+  ctx.fillStyle = linear(-r * 0.3, 0, r * 0.3, 0, [[0, '#ffffff'], [0.5, '#f2f6ff'], [0.52, '#b9c4dd'], [1, '#9aa6c4']]); ctx.fill();
+  range(43, r * 0.18, r * 0.02, 'rgba(30,36,60,0.95)', 26);
+  ctx.fillStyle = linear(0, base - r * 0.2, 0, base, [[0, 'rgba(255,255,255,0)'], [1, 'rgba(230,235,255,0.25)']]); ctx.fillRect(-W, base - r * 0.2, 2 * W, r * 0.2);
+  dimV(r * 0.95, base - r * 0.98, base, '8849 m', ann);
+} };
+O[5] = { fast: true, f(r, t, a, ann) {
+  const R = r * 26, gy = r * 0.55, cy = gy + R;
+  ctx.fillStyle = radial(0, cy, R, R + r * 1.35, [[0, 'rgba(120,190,255,0.75)'], [0.3, 'rgba(80,150,255,0.35)'], [0.7, 'rgba(60,110,230,0.1)'], [1, 'rgba(40,80,200,0)']]);
+  ctx.beginPath(); ctx.arc(0, cy, R + r * 1.35, 0, TAU); ctx.fill();
+  ctx.fillStyle = radial(0, cy - R * 0.2, R * 0.6, R, [[0, '#04101f'], [1, '#0d2c55']]); circle(0, cy, R); ctx.fill();
+  const RR = rng(55); for (let k = 0; k < 160; k++) { const th = (RR() - 0.5) * 0.12, d = R - RR() * r * 0.4; glow(Math.sin(th) * d, cy - Math.cos(th) * d, 5, [255, 210, 140], 0.6 * RR()); }
+  ctx.save(); ctx.setLineDash([18, 14]); ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, cy, R + r, -Math.PI / 2 - 0.09, -Math.PI / 2 + 0.09); ctx.stroke(); ctx.restore();
+  label('卡门线 · 100 km', r * 0.35, gy - r * 1.08, a, 'left', 32);
+} };
+O[6] = { fast: true, f(r, t, a, ann) {
+  ctx.save(); circle(0, 0, r); ctx.clip();
+  ctx.fillStyle = radial(-r * 0.35, -r * 0.35, r * 0.1, r * 1.3, [[0, '#f0f0ee'], [0.5, '#a9a9a6'], [1, '#3c3c3c']]); ctx.fillRect(-r, -r, 2 * r, 2 * r);
+  for (const [x, y, k, s] of [[-0.3, -0.2, 0.32, 1], [0.25, 0.1, 0.25, 2], [-0.1, 0.35, 0.22, 3], [0.35, -0.38, 0.18, 4]]) { blob(x * r, y * r, k * r, k * r * 0.8, s, 9, 0.3); ctx.fillStyle = 'rgba(60,60,70,0.35)'; ctx.fill(); }
+  const R = rng(6); for (let i = 0; i < 26; i++) { const x = (R() * 2 - 1) * r * 0.9, y = (R() * 2 - 1) * r * 0.9, k = r * (0.02 + 0.08 * R() * R());
+    ctx.fillStyle = 'rgba(70,70,75,0.5)'; circle(x, y, k); ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = Math.max(1, k * 0.15); ctx.beginPath(); ctx.arc(x, y, k, 2.2, 5.0); ctx.stroke(); }
+  ctx.fillStyle = linear(-r * 0.2, 0, r, 0, [[0, 'rgba(0,0,0,0)'], [0.6, 'rgba(0,0,8,0.65)'], [1, 'rgba(0,0,8,0.92)']]); ctx.fillRect(-r, -r, 2 * r, 2 * r); ctx.restore();
+  dimH(r * 1.15, -r, r, '3474 km', ann);
+} };
+O[7] = { fast: true, f(r, t, a, ann) {
+  ctx.fillStyle = radial(0, 0, r * 0.95, r * 1.18, [[0, 'rgba(110,180,255,0.6)'], [1, 'rgba(60,120,255,0)']]); circle(0, 0, r * 1.18); ctx.fill();
+  ctx.save(); circle(0, 0, r); ctx.clip();
+  ctx.fillStyle = radial(-r * 0.3, -r * 0.3, r * 0.1, r * 1.2, [[0, '#4aa3ff'], [0.55, '#1557c0'], [1, '#071d4f']]); ctx.fillRect(-r, -r, 2 * r, 2 * r);
+  const rot = t * 0.25;
+  const drawSet = (set, col, spd) => { for (const [lon, lat, k, seed] of set) { const L = lon + rot * spd, cz = Math.cos(L); if (cz < -0.05) continue;
+    const x = Math.sin(L) * Math.cos(lat * 0.8) * r, y = -Math.sin(lat * 0.8) * r * 0.95; ctx.save(); ctx.translate(x, y); ctx.scale(Math.max(0.15, cz), 1); blob(0, 0, k * r, k * r * 0.75, seed, 9, 0.4); ctx.fillStyle = col; ctx.fill(); ctx.restore(); } };
+  drawSet(CONTS, 'rgba(70,150,80,0.95)', 1); drawSet(CLOUDS, 'rgba(255,255,255,0.55)', 1.4);
+  ctx.fillStyle = linear(-r * 0.1, 0, r, 0, [[0, 'rgba(0,0,10,0)'], [0.55, 'rgba(0,0,10,0.6)'], [1, 'rgba(0,0,10,0.92)']]); ctx.fillRect(-r, -r, 2 * r, 2 * r); ctx.restore();
+  ctx.strokeStyle = 'rgba(170,215,255,0.7)'; ctx.lineWidth = Math.max(1, r * 0.012); ctx.beginPath(); ctx.arc(0, 0, r, 1.8, 4.6); ctx.stroke();
+  dimH(r * 1.22, -r, r, '12742 km', ann);
+} };
+O[8] = { f(r, t, a, ann) {
+  ctx.save(); ctx.setLineDash([6, 10]); ctx.strokeStyle = 'rgba(200,210,235,0.5)'; ctx.lineWidth = 2; circle(0, 0, r * 0.9); ctx.stroke(); ctx.restore();
+  const th = -0.7 + t * 0.12, mx = Math.cos(th) * r * 0.9, my = Math.sin(th) * r * 0.9;
+  const er = Math.max(9, r * 0.9 / 60); glow(0, 0, er * 6, [90, 160, 255], 0.8); sphere(0, 0, er, '#bfe0ff', '#2f7ae0', '#0a2a6b');
+  sphere(mx, my, Math.max(5, er * 0.27), '#fff', '#bbb', '#444');
+  const u = ((t - B0) / P) % 1, lx = mx * u, ly = my * u;
+  ctx.strokeStyle = linear(0, 0, lx || 1, ly || 1, [[0, 'rgba(255,250,200,0)'], [1, 'rgba(255,250,200,0.9)']]); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(lx, ly); ctx.stroke();
+  glow(lx, ly, 26, [255, 250, 210], 1.0);
+  label('地球', er * 2 + 10, 14, a * 0.9, 'left', 28); label('月球', mx + 22, my, a * 0.9, 'left', 28);
+  label('光 · 1.3 秒', mx / 2 - 20, my / 2 - 34, ann, 'right', 30, [255, 245, 200]);
+} };
+O[9] = { fast: true, f(r, t, a, ann) {
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = radial(0, 0, r * 0.9, r * 2.4, [[0, 'rgba(255,170,60,0.55)'], [0.25, 'rgba(255,120,30,0.2)'], [1, 'rgba(255,80,0,0)']]); circle(0, 0, r * 2.4); ctx.fill(); ctx.restore();
+  ctx.save(); circle(0, 0, r); ctx.clip();
+  ctx.fillStyle = radial(0, 0, 0, r, [[0, '#fff7d6'], [0.55, '#ffd56a'], [0.85, '#ff9f30'], [1, '#e2571b']]); ctx.fillRect(-r, -r, 2 * r, 2 * r);
+  ctx.globalAlpha = a * 0.35; ctx.globalCompositeOperation = 'overlay'; ctx.translate(Math.sin(t * 0.3) * r * 0.05, 0); ctx.drawImage(GRAN, -r * 1.1, -r * 1.1, r * 2.2, r * 2.2); ctx.restore(); ctx.globalAlpha = a;
+  for (const [x, y, k] of [[0.3, 0.15, 0.06], [0.36, 0.2, 0.035], [-0.4, -0.25, 0.045]]) { ctx.fillStyle = 'rgba(90,30,0,0.75)'; ctx.beginPath(); ctx.ellipse(x * r, y * r, k * r, k * r * 0.7, 0.4, 0, TAU); ctx.fill(); }
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = 'rgba(255,120,60,0.55)'; ctx.lineWidth = Math.max(2, r * 0.02);
+  ctx.beginPath(); ctx.arc(Math.cos(-0.9) * r * 1.02, Math.sin(-0.9) * r * 1.02, r * 0.1, Math.PI * 0.9, Math.PI * 2.1); ctx.stroke(); ctx.restore();
+  const ex = r * 1.3, er = Math.max(3, r / 109); sphere(ex, 0, er, '#cfe6ff', '#3a85e6', '#0a2a6b');
+  label('← 地球（同比例）', ex + er + 12, 0, ann, 'left', 28);
+  dimH(r * 1.2, -r, r, '139 万 km', ann);
+} };
+O[10] = { f(r, t, a, ann) {
+  const sr = r * 0.14; glow(0, 0, sr * 4, [255, 190, 80], 0.8); sphere(0, 0, sr, '#fff7d6', '#ffcf5a', '#e2571b');
+  const u = ((t - B0) / P) % 1, rr = sr + (r * 0.95 - sr) * easeOut(u);
+  ctx.strokeStyle = `rgba(255,248,200,${0.75 * (1 - u * 0.6)})`; ctx.lineWidth = 3; circle(0, 0, rr); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,248,200,0.2)'; ctx.lineWidth = 2; circle(0, 0, r * 0.95); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.moveTo(sr, 0); ctx.lineTo(r * 0.95, 0); ctx.stroke();
+  label('光走 33 秒', r * 0.55, -26, ann, 'center', 30, [255, 245, 200]);
+} };
+function planet(x, y, s, col) { glow(x, y, s * 4, col, 0.5); sphere(x, y, s, rgba(col.map(v => Math.min(255, v + 80)), 1), rgba(col, 1), rgba(col.map(v => v * 0.3), 1)); }
+const PLAN = [[0.39, 0.24, [180, 170, 160], 5, '水星'], [0.72, 0.62, [240, 210, 150], 7, '金星'], [1.0, 1.0, [90, 160, 255], 8, '地球'], [1.52, 1.88, [230, 100, 70], 6, '火星'],
+  [5.2, 11.9, [230, 190, 140], 13, '木星'], [9.5, 29.5, [240, 220, 160], 11, '土星'], [19.2, 84, [150, 230, 240], 9, '天王星'], [30.1, 165, [90, 120, 255], 9, '海王星']];
+function orbits(list, scale, t, a, labels) {
+  for (const [au, per, col, s, nm] of list) { const rr = au * scale; if (rr < 4) continue;
+    ctx.strokeStyle = rgba(col, 0.35); ctx.lineWidth = 2; circle(0, 0, rr); ctx.stroke();
+    const th = 1.2 + au + t * 1.6 / Math.pow(per, 0.5), x = Math.cos(th) * rr, y = Math.sin(th) * rr; planet(x, y, s, col);
+    if (nm === '土星') { ctx.strokeStyle = 'rgba(240,220,170,0.8)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x, y, s * 2.1, s * 0.7, -0.3, 0, TAU); ctx.stroke(); }
+    if (labels.includes(nm)) label(nm, x + s + 12, y, a * 0.95, 'left', 28); }
+  glow(0, 0, 60, [255, 190, 80], 0.9); sphere(0, 0, 10, '#fff', '#ffd56a', '#e2571b');
+}
+O[11] = { f(r, t, a, ann) { orbits(PLAN.slice(0, 4), r * 0.95 / 1.52, t, a, ['地球', '火星']); } };
+O[12] = { f(r, t, a, ann) { orbits(PLAN.slice(0, 6), r * 0.95 / 9.5, t, a, ['木星', '土星']); } };
+O[13] = { f(r, t, a, ann) {
+  const sc = r * 0.92 / 170; orbits(PLAN.slice(4), sc, t, a, ['海王星']);
+  const hr = 120 * sc; ctx.fillStyle = radial(0, 0, hr * 0.6, hr, [[0, 'rgba(90,160,255,0)'], [1, 'rgba(90,160,255,0.12)']]); circle(0, 0, hr); ctx.fill();
+  ctx.strokeStyle = 'rgba(120,190,255,0.55)'; ctx.lineWidth = 2; ctx.setLineDash([10, 8]); circle(0, 0, hr); ctx.stroke(); ctx.setLineDash([]);
+  const ang = -0.55, vx = Math.cos(ang) * r * 0.92, vy = Math.sin(ang) * r * 0.92;
+  ctx.strokeStyle = linear(0, 0, vx, vy, [[0, 'rgba(255,255,255,0)'], [1, 'rgba(255,255,255,0.7)']]); ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(vx * 0.3, vy * 0.6, vx, vy); ctx.stroke();
+  glow(vx, vy, 30, [255, 255, 255], 1); label('旅行者 1 号', vx + 18, vy - 4, a, 'left', 30);
+  label('日球层顶', Math.cos(2.3) * hr - 10, Math.sin(2.3) * hr + 30, a * 0.85, 'right', 26, [150, 205, 255]);
+} };
+O[14] = { f(r, t, a, ann) {
+  const sc = r * 0.95 / 937, A_ = (76 + 937) / 2 * sc, C_ = A_ - 76 * sc, B_ = Math.sqrt(A_ * A_ - C_ * C_), ang = 2.4;
+  ctx.save(); ctx.rotate(ang); ctx.strokeStyle = 'rgba(255,160,130,0.7)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.ellipse(C_, 0, A_, B_, 0, 0, TAU); ctx.stroke();
+  const th = 2.75 + t * 0.03, sx = C_ + Math.cos(th) * A_, sy = Math.sin(th) * B_; ctx.restore();
+  const X = sx * Math.cos(ang) - sy * Math.sin(ang), Y = sx * Math.sin(ang) + sy * Math.cos(ang);
+  planet(X, Y, 7, [255, 120, 90]); label('赛德娜', X + 18, Y, a, 'left', 30);
+  ctx.strokeStyle = 'rgba(120,190,255,0.5)'; ctx.lineWidth = 2; circle(0, 0, 120 * sc); ctx.stroke();
+  glow(0, 0, 50, [255, 190, 80], 0.9);
+} };
+O[15] = { f(r, t, a, ann) {
+  const rot = t * 0.12, tilt = 0.35;
+  for (const [x, y, z] of OORT) { const X = x * Math.cos(rot) + z * Math.sin(rot), Zp = -x * Math.sin(rot) + z * Math.cos(rot), Y = y * Math.cos(tilt) - Zp * Math.sin(tilt), D = y * Math.sin(tilt) + Zp * Math.cos(tilt);
+    ctx.fillStyle = `rgba(185,215,255,${0.25 + 0.5 * (D + 1) / 2})`; ctx.fillRect(X * r, Y * r, 2.4, 2.4); }
+  glow(0, 0, 45, [255, 190, 80], 0.9);
+} };
+O[16] = { f(r, t, a, ann) {
+  ctx.save(); ctx.setLineDash([14, 10]); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2.5; circle(0, 0, r * 0.95); ctx.stroke(); ctx.restore();
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(r * 0.95, 0); ctx.stroke();
+  label('1 光年', r * 0.48, -28, a, 'center', 32); glow(0, 0, 40, [255, 190, 80], 0.9);
+} };
+O[17] = { fast: true, f(r, t, a, ann) {
+  const ang = -2.25, px = Math.cos(ang) * r * 0.85, py = Math.sin(ang) * r * 0.85;
+  ctx.save(); ctx.setLineDash([10, 10]); ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(px, py); ctx.stroke(); ctx.restore();
+  star(0, 0, 6, [255, 210, 120], a); star(px + 22, py + 10, 6, [255, 230, 170], a); star(px + 34, py + 2, 4.5, [255, 180, 110], a); star(px, py, 3.5, [255, 80, 60], a);
+  label('比邻星', px - 14, py - 30, a, 'center', 30, [255, 190, 170]); label('太阳', 18, 26, a * 0.9, 'left', 28, [255, 230, 160]);
+  label('4.2 光年', px / 2 + 20, py / 2 + 10, ann, 'left', 30);
+} };
+O[18] = { fast: true, f(r, t, a, ann) {
+  const ox = r * 0.55, oy = -r * 0.55;
+  for (const [dx, dy, k, c] of [[0, 0, 0.32, [60, 110, 255]], [0.1, -0.06, 0.2, [90, 150, 255]], [-0.08, 0.08, 0.22, [70, 90, 220]]]) glow(ox + dx * r, oy + dy * r, k * r, c, 0.35);
+  for (const [x, y, b] of [[0, 0, 1], [0.09, 0.05, 0.85], [-0.07, 0.07, 0.9], [0.13, -0.07, 0.7], [-0.03, -0.1, 0.8], [0.18, 0.1, 0.65], [-0.13, -0.02, 0.7]]) {
+    const X = ox + x * r, Y = oy + y * r, s = 2.5 + 3 * b; star(X, Y, s, [170, 200, 255], a);
+    ctx.strokeStyle = `rgba(200,220,255,${0.5 * b})`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(X - s * 5, Y); ctx.lineTo(X + s * 5, Y); ctx.moveTo(X, Y - s * 5); ctx.lineTo(X, Y + s * 5); ctx.stroke(); }
+  label('昴星团', ox, oy + r * 0.3, a, 'center', 30, [190, 210, 255]); star(0, 0, 4, [255, 210, 120], a); label('太阳', 16, 24, a * 0.85, 'left', 26, [255, 230, 160]);
+} };
+O[19] = { fast: true, f(r, t, a, ann) {
+  const ox = -r * 0.45, oy = r * 0.42, R = rng(19);
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < 22; k++) { const c = [[255, 70, 140], [80, 150, 255], [255, 140, 70], [170, 80, 255], [60, 220, 200]][k % 5]; const x = ox + gauss(R) * r * 0.18, y = oy + gauss(R) * r * 0.15, rr = r * (0.06 + 0.16 * R());
+    ctx.fillStyle = radial(x, y, 0, rr, [[0, rgba(c, 0.22)], [1, rgba(c, 0)]]); circle(x, y, rr); ctx.fill(); }
+  ctx.restore();
+  for (let i = 0; i < 4; i++) star(ox + [-8, 8, -2, 10][i], oy + [-6, -4, 8, 6][i], 2.5, [230, 240, 255], a);
+  label('猎户座大星云', ox, oy - r * 0.4, a, 'center', 30, [255, 200, 230]); star(0, 0, 3.5, [255, 210, 120], a);
+} };
+O[20] = { fast: true, f(r, t, a, ann) {
+  for (const [x, y, b, c] of ARM) { const col = c < 0.12 ? [170, 200, 255] : c < 0.24 ? [255, 210, 160] : c < 0.27 ? [255, 120, 170] : [235, 235, 255];
+    ctx.fillStyle = rgba(col, 0.2 + 0.6 * b); const s = 1 + 2 * b * b; ctx.fillRect(x * r, y * r, s, s); }
+  ctx.save(); ctx.rotate(Math.atan(0.45)); ctx.fillStyle = 'rgba(10,5,15,0.35)'; for (const [x, w] of [[-0.6, 0.6], [0.4, 0.9]]) { ctx.beginPath(); ctx.ellipse(x * r, r * 0.03, w * r * 0.5, r * 0.04, 0, 0, TAU); ctx.fill(); } ctx.restore();
+  const ang = 2.6, ax = Math.cos(ang) * r * 0.95, ay = Math.sin(ang) * r * 0.95;
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(Math.cos(ang) * r * 0.3, Math.sin(ang) * r * 0.3); ctx.lineTo(ax, ay);
+  ctx.lineTo(ax + 22 * Math.cos(ang - 2.6), ay + 22 * Math.sin(ang - 2.6)); ctx.moveTo(ax, ay); ctx.lineTo(ax + 22 * Math.cos(ang + 2.6), ay + 22 * Math.sin(ang + 2.6)); ctx.stroke();
+  label('银心方向', ax + 10, ay - 30, a, 'center', 28); star(0, 0, 3.5, [255, 220, 120], a);
+} };
+function galaxy(parts, gx, gy, R, rot, tilt, a, bright = 1) {
+  if (R < 2) { glow(gx, gy, 8, [230, 220, 255], 0.8 * a); return; }
+  glow(gx, gy, R * 0.5, [255, 220, 170], 0.6 * bright); glow(gx, gy, R * 1.1, [140, 150, 255], 0.25 * bright);
+  const cs = Math.cos(rot), sn = Math.sin(rot);
+  for (const [x, y, col, b, s] of parts) { const X = (x * cs - y * sn) * R, Y = (x * sn + y * cs) * R * tilt; ctx.fillStyle = rgba(col, b * 0.75 * bright); const ss = Math.max(1, s * Math.min(1.6, R / 300)); ctx.fillRect(gx + X, gy + Y, ss, ss); }
+}
+const GOFF = [Math.cos(2.6) * 0.52, Math.sin(2.6) * 0.52];
+O[21] = { f(r, t, a, ann) {
+  galaxy(MW, GOFF[0] * r, GOFF[1] * r, r, t * 0.04, 1.0, a);
+  const pr = 10 + 6 * Math.sin(t * 5); ctx.strokeStyle = 'rgba(255,255,140,0.9)'; ctx.lineWidth = 2.5; circle(0, 0, pr + 6); ctx.stroke(); glow(0, 0, 18, [255, 255, 140], 1);
+  label('太阳在这里', 30, -24, a, 'left', 28, [255, 250, 170]);
+} };
+O[22] = { f(r, t, a, ann) {
+  galaxy(M31, r * 0.52, -r * 0.5, r * 0.42, 0.6, 0.32, a);
+  label('仙女座星系', r * 0.52, -r * 0.5 + r * 0.24, a, 'center', 30, [230, 210, 255]); label('银河系', 0, r * 0.16, a * 0.9, 'center', 26);
+} };
+O[23] = { fast: true, f(r, t, a, ann) {
+  const R = rng(230); for (let i = 0; i < 70; i++) { const x = gauss(R) * r * 0.45, y = gauss(R) * r * 0.38; glow(x, y, 6 + 8 * R(), [210, 200, 255], 0.6); }
+  galaxy(MW, 0, 0, r * 0.05, t * 0.04, 1, a); galaxy(M31, r * 0.052, -r * 0.05, r * 0.042, 0.6, 0.32, a);
+  glow(r * 0.09, -r * 0.01, 12, [200, 200, 255], 0.7);
+  ctx.save(); ctx.setLineDash([10, 10]); ctx.strokeStyle = 'rgba(210,200,255,0.45)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(0, 0, r * 0.95, r * 0.75, 0.2, 0, TAU); ctx.stroke(); ctx.restore();
+  label('银河系 + 仙女座', r * 0.1, r * 0.08, a * 0.9, 'left', 26);
+} };
+O[24] = { fast: true, f(r, t, a, ann) {
+  for (const [x, y, b] of FIELDG) glow(x * r, y * r, 4 + 6 * b, [190, 190, 255], 0.5);
+  const ox = -r * 0.5, oy = -r * 0.5; for (const [x, y, b] of VIRGO) glow(ox + x * r * 1.6, oy + y * r * 1.6, 3 + 6 * b, [255, 215, 180], 0.6);
+  label('室女座星系团', ox, oy + r * 0.48, a, 'center', 30, [255, 220, 190]); glow(0, 0, 16, [255, 255, 200], 1); label('本星系群', 18, 22, a * 0.9, 'left', 26);
+} };
+O[25] = { fast: true, f(r, t, a, ann) {
+  const ga = [-r * 0.3, r * 0.25];
+  for (let k = 0; k < 60; k++) { const th = k / 60 * TAU; let x = ga[0] + Math.cos(th) * r * 1.2, y = ga[1] + Math.sin(th) * r * 1.1; const pts = [];
+    for (let s = 0; s < 46; s++) { const dx = ga[0] - x, dy = ga[1] - y, d = Math.hypot(dx, dy) + 1e-6, sw = 0.4 * Math.sin(th * 3); x += (dx / d * Math.cos(sw) - dy / d * Math.sin(sw)) * r * 0.028; y += (dy / d * Math.cos(sw) + dx / d * Math.sin(sw)) * r * 0.028; pts.push([x, y]); if (d < r * 0.05) break; }
+    ctx.strokeStyle = 'rgba(140,215,255,0.28)'; ctx.lineWidth = 2; ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke();
+    const u = (t * 0.4 + k * 0.137) % 1, p = pts[Math.floor(u * (pts.length - 1))]; glow(p[0], p[1], 10, [200, 240, 255], 0.9); }
+  glow(ga[0], ga[1], r * 0.18, [120, 200, 255], 0.6); glow(0, 0, 14, [255, 255, 200], 1); label('我们', 18, -20, a, 'left', 26);
+} };
+O[26] = { f(r, t, a, ann) {
+  const rr = r * 0.95, N = WEB.nodes;
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineWidth = Math.max(1, r * 0.004);
+  for (const [i, j] of WEB.edges) { ctx.strokeStyle = 'rgba(170,120,255,0.3)'; ctx.beginPath(); ctx.moveTo(N[i][0] * rr, N[i][1] * rr); ctx.lineTo(N[j][0] * rr, N[j][1] * rr); ctx.stroke(); }
+  ctx.restore(); for (const [x, y, b] of N) glow(x * rr, y * rr, Math.max(4, r * (0.012 + 0.025 * b)), [220, 170, 255], 0.75);
+  for (let k = 0; k < CMB.length; k++) { const v = CMB[k], c = v > 0 ? [255, 150 + 60 * v, 70] : [90, 160 - 60 * v, 255]; ctx.strokeStyle = rgba(c, 0.9); ctx.lineWidth = Math.max(3, r * 0.05);
+    ctx.beginPath(); ctx.arc(0, 0, rr, k / CMB.length * TAU, (k + 1.05) / CMB.length * TAU); ctx.stroke(); }
+  glow(0, 0, rr * 1.1, [255, 140, 100], 0.08);
+  const pr = 8 + 4 * Math.sin(t * 5); glow(0, 0, 20, [255, 255, 200], 1); ctx.strokeStyle = 'rgba(255,255,200,0.8)'; ctx.lineWidth = 2; circle(0, 0, pr + 8); ctx.stroke();
+  label('你在这里', 26, -22, ann, 'left', 28, [255, 250, 200]); label('宇宙微波背景', rr * 0.72, rr * 0.82, ann, 'left', 26, [255, 190, 150]);
+} };
+const ORDER = Object.keys(O).map(Number).sort((a, b) => b - a);
+function objAlpha(n, z) { const rel = n - z, up = O[n].up || 0.9; const hi = 1 - smooth(up - 0.55, up, rel); const lo = O[n].fast ? smooth(-0.95, -0.55, rel) : smooth(-1.6, -0.85, rel); return hi * lo; }
+
+// ------------------------------------------------------------ background
+const BGK = [[-13, [3, 18, 28], [0, 50, 70]], [-6, [4, 24, 22], [8, 62, 52]], [-1.5, [16, 14, 34], [64, 44, 78]], [3, [18, 28, 62], [86, 112, 168]], [5.2, [4, 9, 28], [16, 34, 84]], [6.5, [1, 1, 8], [6, 6, 20]], [27, [1, 1, 8], [10, 4, 24]]];
+function bg(z) { for (let i = 0; i < BGK.length - 1; i++) { const [z0, a0, b0] = BGK[i], [z1, a1, b1] = BGK[i + 1]; if (z >= z0 && z <= z1) { const u = (z - z0) / (z1 - z0); return [a0.map((v, j) => v + (a1[j] - v) * u), b0.map((v, j) => v + (b1[j] - v) * u)]; } } return [BGK[BGK.length - 1][1], BGK[BGK.length - 1][2]]; }
+function starfield(z, t) {
+  const k = smooth(5.3, 6.6, z); if (k <= 0) return; const f = ((z % 1) + 1) % 1;
+  for (let L = 0; L < 2; L++) { const sc = [Math.pow(10, 1 - f), Math.pow(10, -f)][L] * 0.62; let la = L === 0 ? (sc > 3 ? smooth(10, 3, sc) : 1) : smooth(0.06, 0.25, sc); la *= k;
+    for (let i = 0; i < 420; i++) { const [x, y, b, col, ph] = STARS[i]; const px = x * W * sc, py = y * W * sc; if (Math.abs(px) > W * 0.6 || Math.abs(py) > H * 0.55) continue;
+      const tw = 0.75 + 0.25 * Math.sin(t * 2.3 + ph), al = la * (0.35 + 0.65 * b) * tw; ctx.fillStyle = rgba(col, al); const s = 1.2 + 2.6 * b; ctx.fillRect(px - s / 2, py - s / 2, s, s); if (b > 0.6) glow(px, py, 14 * b, col, 0.35 * al); } }
+}
+
+// ------------------------------------------------------------ HUD
+function exponentGroup(n, col, y, sc, alpha) {
+  const e = (n < 0 ? '−' : '') + Math.abs(n);
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(CX, y); ctx.scale(sc, sc);
+  ctx.font = '700 196px SG'; const w1 = ctx.measureText('10').width; ctx.font = '700 98px SG'; const w2 = ctx.measureText(e).width; ctx.font = '300 70px NS'; const w3 = ctx.measureText('米').width;
+  const tot = w1 + 8 + w2 + 26 + w3; let x = -tot / 2;
+  txt('10', x, 0, '700 196px SG', '#ffffff', 'left'); x += w1 + 8;
+  txt(e, x, -92, '700 98px SG', rgba(col, 1), 'left'); x += w2 + 26;
+  txt('米', x, 0, '300 70px NS', 'rgba(230,235,250,0.85)', 'left');
+  ctx.restore();
+}
+function ruler(z, a) {
+  if (a <= 0.01) return; ctx.save(); ctx.globalAlpha = a;
+  const x0 = 110, x1 = 970, y = 1752, X = v => x0 + (v - N0) / (26 - N0) * (x1 - x0);
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+  for (const [z0, z1, nm, col] of ZONES) { const on = z >= z0 && z < z1 + 1e-3; ctx.strokeStyle = rgba(col, on ? 0.95 : 0.35); ctx.lineWidth = on ? 5 : 3; ctx.beginPath(); ctx.moveTo(X(z0) + 4, y); ctx.lineTo(X(z1) - 4, y); ctx.stroke();
+    txt(nm, (X(z0) + X(z1)) / 2, y + 44, `${on ? 500 : 300} 25px NS`, rgba(col, on ? 1 : 0.55), 'center', 'middle'); }
+  for (let v = N0; v <= 26; v++) { const big = v % 6 === 0; ctx.strokeStyle = `rgba(255,255,255,${big ? 0.55 : 0.25})`; ctx.lineWidth = big ? 2 : 1.5; ctx.beginPath(); ctx.moveTo(X(v), y - (big ? 12 : 6)); ctx.lineTo(X(v), y); ctx.stroke(); }
+  for (const v of [-12, -6, 0, 6, 12, 18, 24]) txt(String(v), X(v), y - 22, '500 22px SG', 'rgba(255,255,255,0.5)', 'center', 'alphabetic');
+  const m = X(clamp(z, N0, 26)), col = zoneCol(z); glow(m, y, 34, col, 0.9); ctx.fillStyle = '#fff'; circle(m, y, 7); ctx.fill(); ctx.strokeStyle = rgba(col, 1); ctx.lineWidth = 3; circle(m, y, 12); ctx.stroke();
+  ctx.restore();
+}
+
+// ------------------------------------------------------------ frame
+function drawFrame(i) {
+  const t = T0 + i / FPS, z = Z(t);
+  const k = t >= B0 ? Math.min(KMAX, Math.floor((t - B0) / P)) : -1;
+  const main = t >= DROP && t < CUT;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  const [c1, c2] = bg(z);
+  ctx.fillStyle = linear(0, 0, 0, H, [[0, rgba(c1, 1)], [1, rgba(c2, 1)]]); ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = radial(CX, CY, 0, H * 0.7, [[0, rgba(c2.map(v => v * 1.25), 0.5)], [1, 'rgba(0,0,0,0)']]); ctx.fillRect(0, 0, W, H);
+
+  // scene with beat zoom-punch
+  const punch = 1 + (main ? 0.022 : 0.01) * pulse(t, BEATS, 0.1) + 0.05 * pulse(t, [DROP], 0.3);
+  ctx.save(); ctx.translate(CX, CY); ctx.scale(punch, punch);
+  starfield(z, t);
+  for (const n of ORDER) { const a = objAlpha(n, z); if (a <= 0.01) continue; const r = R0 * Math.pow(10, n - z), rel = n - z;
+    const ann = (1 - smooth(0.06, 0.4, Math.abs(rel + 0.03))) * a;
+    LABK = a * smooth(-0.55, -0.25, rel) * (1 - smooth(0.25, 0.55, rel)) * (1 - smooth(CARD - 0.2, CARD + 0.2, t));
+    ctx.save(); ctx.globalAlpha = a; O[n].f(r, t, a, ann * (1 - smooth(CARD - 0.2, CARD + 0.2, t))); ctx.restore(); }
+  LABK = 1;
+  // x10 frame: the old field of view shrinking to 1/10
+  const bt = since(t, BEATS);
+  if (bt !== null && bt < 0.5 && t < CUT) { const u = easeOut(bt / 0.32), s = R0 * 1.25 * (1 - 0.9 * u), al = (1 - bt / 0.5) * (main ? 0.85 : 0.6);
+    ctx.strokeStyle = `rgba(255,255,255,${al})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(-s, -s, 2 * s, 2 * s, Math.max(4, s * 0.06)); ctx.stroke();
+    txt('×10', s + 14, -s + 4, '700 34px SG', `rgba(255,255,255,${al})`, 'left', 'top'); }
+  ctx.restore();
+
+  // drop bloom
+  const dp = pulse(t, [DROP], 0.35); if (dp > 0.01) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = radial(CX, CY, 0, H * 0.8, [[0, `rgba(255,230,200,${0.75 * dp})`], [1, 'rgba(255,200,150,0)']]); ctx.fillRect(0, 0, W, H); ctx.restore(); }
+
+  // vignette + grain
+  ctx.fillStyle = radial(CX, H * 0.5, H * 0.3, H * 0.75, [[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0.55)']]); ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.globalAlpha = 0.05; ctx.globalCompositeOperation = 'overlay'; const R = rng(i + 1); const ox = -R() * 256, oy = -R() * 256;
+  for (let y = oy; y < H; y += 256) for (let x = ox; x < W; x += 256) ctx.drawImage(GRAIN, x, y); ctx.restore();
+  // top / bottom gradients for legibility
+  ctx.fillStyle = linear(0, 0, 0, 420, [[0, 'rgba(0,0,0,0.45)'], [1, 'rgba(0,0,0,0)']]); ctx.fillRect(0, 0, W, 420);
+  ctx.fillStyle = linear(0, 1330, 0, H, [[0, 'rgba(0,0,0,0)'], [0.35, 'rgba(0,0,0,0.5)'], [1, 'rgba(0,0,0,0.7)']]); ctx.fillRect(0, 1330, W, H - 1330);
+
+  // ---- HUD
+  const cardA = smooth(CARD, CARD + 0.4, t);
+  const hudA = 1 - cardA;
+  // pill
+  ctx.save(); ctx.globalAlpha = hudA; ctx.font = '500 32px NS'; ctx.letterSpacing = '4px'; const pw = ctx.measureText('一拍 = 视野放大 10 倍').width + 120; ctx.letterSpacing = '0px';
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(CX - pw / 2, 86, pw, 64, 32); ctx.stroke();
+  const pb = pulse(t, BEATS, 0.12); ctx.fillStyle = `rgba(255,255,255,${0.04 + 0.08 * pb})`; ctx.fill();
+  glow(CX - pw / 2 + 40, 118, 18, zoneCol(z), 0.5 + 0.5 * pb); ctx.fillStyle = rgba(zoneCol(z), 1); circle(CX - pw / 2 + 40, 118, 6); ctx.fill();
+  txt('一拍 = 视野放大 10 倍', CX + 18, 119, '500 32px NS', 'rgba(255,255,255,0.88)', 'center', 'middle', '4px'); ctx.restore();
+
+  // exponent + names
+  let n, dt;
+  if (t < B0) { n = null; } else if (t < CUT) { n = N0 + k; dt = t - beatT(k); } else { n = clamp(Math.round(z - 0.1), 23, 26); dt = null; }
+  const col = zoneCol(z);
+  if (n !== null) {
+    const sc = dt !== null ? 1 + 0.14 * Math.exp(-dt / 0.08) * (main ? 1.2 : 0.8) : 1;
+    exponentGroup(n, col, 335, sc, hudA);
+    const [nm, fact] = FACTS[String(n)];
+    // timing for coda labels
+    let e1, e2;
+    if (dt !== null) { e1 = easeOut(dt / 0.22); e2 = easeOut((dt - 0.08) / 0.25); }
+    else { const dz = Math.abs(z - n); e1 = n === 26 ? smooth(0.5, 0.15, dz) : 1 - smooth(0.2, 0.45, dz); e2 = n === 26 ? smooth(CUT + CODA_Z - 0.2, CUT + CODA_Z + 0.3, t) : (n === 23 ? 1 - smooth(CUT, CUT + 0.3, t) : 0); }
+    ctx.save(); ctx.globalAlpha = hudA * clamp(e1, 0, 1);
+    const big = n === 0 ? 210 : nm.length <= 4 ? 104 : nm.length <= 6 ? 92 : 80;
+    txt(nm, CX, 1468 + 22 * (1 - e1), `900 ${big}px NSerif`, '#ffffff', 'center', 'alphabetic', n === 0 ? '0px' : '6px');
+    ctx.restore();
+    ctx.save(); ctx.globalAlpha = hudA * clamp(e2, 0, 1);
+    ctx.fillStyle = rgba(col, 1); ctx.fillRect(CX - 36, 1508, 72, 4);
+    txt(fact, CX, 1574 + 14 * (1 - e2), '300 42px NS', 'rgba(225,232,248,0.95)', 'center', 'alphabetic', '1px');
+    ctx.restore();
+  } else {
+    const u = smooth(T0 + 0.05, T0 + 0.45, t);
+    ctx.save(); ctx.globalAlpha = u; txt('从原子内部', CX, 1430, '900 92px NSerif', '#fff', 'center', 'alphabetic', '6px'); txt('到可观测宇宙', CX, 1550, '900 92px NSerif', '#fff', 'center', 'alphabetic', '6px'); ctx.restore();
+  }
+  ruler(z, hudA);
+
+  // end card
+  if (cardA > 0.01) {
+    ctx.fillStyle = `rgba(0,0,6,${0.78 * cardA})`; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.globalAlpha = cardA; const e = easeOut((t - CARD) / 0.5);
+    txt('38', CX, 820 - 20 * (1 - e), '700 260px SG', '#ffffff', 'center', 'alphabetic');
+    txt('个数量级', CX, 940 - 10 * (1 - e), '900 80px NSerif', '#ffffff', 'center', 'alphabetic', '10px');
+    ctx.fillStyle = rgba([255, 120, 190], 1); ctx.fillRect(CX - 40, 990, 80, 4);
+    txt('从 10⁻¹² 米的原子内部', CX, 1080, '300 44px NS', 'rgba(230,236,250,0.95)', 'center', 'alphabetic', '1px');
+    txt('到 10²⁶ 米的可观测宇宙', CX, 1150, '300 44px NS', 'rgba(230,236,250,0.95)', 'center', 'alphabetic', '1px');
+    ctx.restore();
+  }
+  // fades
+  let fade = 1; if (t < T0 + 0.3) fade = (t - T0) / 0.3; if (t > END - 0.8) fade = Math.max(0, (END - t) / 0.8);
+  if (fade < 1) { ctx.fillStyle = `rgba(0,0,0,${1 - fade})`; ctx.fillRect(0, 0, W, H); }
+}
+window.drawFrame = drawFrame;
+window.NFRAMES = Math.round((END - T0) * FPS);
+window.ready = Promise.all([
+  document.fonts.load('300 40px NS'), document.fonts.load('500 40px NS'), document.fonts.load('900 40px NS'),
+  document.fonts.load('900 40px NSerif', '原子你'), document.fonts.load('700 40px SG'), document.fonts.load('500 40px SG')]).then(() => true);
+</script></body></html>
