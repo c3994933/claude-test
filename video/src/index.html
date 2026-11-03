@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>动物冷知识</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: #ffd23f;
+    font-family: "WenQuanYi Zen Hei", "Noto Color Emoji", sans-serif; }
+  #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; }
+  .scene { position: absolute; inset: 0; overflow: hidden; display: none; }
+  .bg { position: absolute; inset: 0; }
+  .dots { position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(255,255,255,.26) 10px, transparent 11px);
+    background-size: 96px 96px; }
+  .burst { position: absolute; left: 50%; top: 45%; width: 2800px; height: 2800px; margin: -1400px 0 0 -1400px; }
+  .glow { position: absolute; inset: 0; }
+  .blob { position: absolute; left: 0; top: 0; border-radius: 50%; background: rgba(255,255,255,.16); }
+  .abs { position: absolute; left: 0; top: 0; white-space: nowrap; }
+  .e { font-family: "Noto Color Emoji"; line-height: 1; }
+  .ink { color: #fff; -webkit-text-stroke: 14px #2b1d3a; paint-order: stroke fill;
+    text-shadow: 0 12px 0 #2b1d3a; font-weight: 900; line-height: 1.1; }
+  .ch { display: inline-block; margin: 0 .04em; }
+  .hl { color: var(--hl, #ffe14d); }
+  .pill { background: #fff; border: 6px solid #2b1d3a; border-radius: 999px; box-shadow: 0 10px 0 #2b1d3a;
+    padding: 18px 44px; font-size: 52px; font-weight: 900; color: #2b1d3a; }
+  .pill i { font-style: normal; color: var(--accent); }
+  .card { background: #fff; border: 6px solid #2b1d3a; border-radius: 48px; box-shadow: 0 14px 0 #2b1d3a;
+    padding: 40px 50px; font-size: 52px; color: #2b1d3a; line-height: 1.5; width: 920px; white-space: normal;
+    text-align: center; font-weight: 700; }
+  .card b { color: var(--accent); }
+  .footer { font-size: 40px; color: #fff; font-weight: 700; text-shadow: 0 4px 0 rgba(43,29,58,.45); }
+  .bar { position: absolute; left: 0; top: 0; border: 6px solid #2b1d3a; border-bottom: none;
+    border-radius: 28px 28px 0 0; box-shadow: 10px 0 0 rgba(43,29,58,.25); }
+  .num { font-size: 50px; color: #fff; -webkit-text-stroke: 10px #2b1d3a; paint-order: stroke fill; font-weight: 900; }
+  .lbl { font-size: 50px; color: #2b1d3a; font-weight: 900; background: #fff; border: 5px solid #2b1d3a;
+    border-radius: 20px; padding: 6px 26px; }
+  .badge { width: 64px; height: 64px; border-radius: 50%; background: #2b1d3a; color: #fff; font-size: 40px;
+    font-weight: 900; display: flex; align-items: center; justify-content: center; border: 5px solid #fff; }
+  .timer { background: #fff; border: 6px solid #2b1d3a; border-radius: 36px; box-shadow: 0 10px 0 #2b1d3a;
+    padding: 14px 34px; font-size: 76px; font-weight: 900; color: #2b1d3a; display: flex; align-items: center; gap: 14px; }
+  .timer span.d { font-family: "WenQuanYi Zen Hei Mono", monospace; }
+  .bubble { position: absolute; left: 0; top: 0; border-radius: 50%; border: 6px solid rgba(255,255,255,.85);
+    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.7) 0 18%, rgba(255,255,255,.12) 19%); }
+  .sticker { background: #ff4f8b; color: #fff; border: 6px solid #2b1d3a; border-radius: 28px; box-shadow: 0 10px 0 #2b1d3a;
+    padding: 14px 32px; font-size: 54px; font-weight: 900; }
+  .stamp { width: 230px; height: 230px; border-radius: 50%; background: #ff3d6e; border: 8px solid #2b1d3a;
+    box-shadow: 0 12px 0 #2b1d3a; display: flex; align-items: center; justify-content: center; flex-direction: column;
+    color: #fff; font-weight: 900; }
+  .btn { background: #fff; border: 6px solid #2b1d3a; border-radius: 999px; box-shadow: 0 10px 0 #2b1d3a;
+    padding: 18px 40px; font-size: 54px; font-weight: 900; color: #2b1d3a; }
+  .ring { position: absolute; left: 0; top: 0; border-radius: 50%; border: 36px solid #fff; display: none; pointer-events: none; }
+  #prog { position: absolute; left: 90px; top: 64px; width: 900px; height: 16px; border-radius: 8px;
+    background: rgba(255,255,255,.35); overflow: hidden; z-index: 999; }
+  #prog > div { height: 100%; width: 0; background: #fff; border-radius: 8px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// ---------- helpers ----------
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const p = (t, a, d) => clamp((t - a) / d);
+const easeOut = x => 1 - Math.pow(1 - x, 3);
+const easeInOut = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const easeOutBack = x => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const easeOutElastic = x => x === 0 ? 0 : x === 1 ? 1 : Math.pow(2, -10 * x) * Math.sin((x * 10 - .75) * (2 * Math.PI / 3)) + 1;
+const easeOutBounce = x => { const n = 7.5625, d = 2.75;
+  if (x < 1 / d) return n * x * x; if (x < 2 / d) return n * (x -= 1.5 / d) * x + .75;
+  if (x < 2.5 / d) return n * (x -= 2.25 / d) * x + .9375; return n * (x -= 2.625 / d) * x + .984375; };
+const TAU = Math.PI * 2;
+const S = Math.sin;
+
+function mk(parent, cls, html = '', style = '') {
+  const d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.innerHTML = html;
+  if (style) d.style.cssText = style;
+  parent.appendChild(d);
+  return d;
+}
+// position an element by its center
+function place(el, x, y, s = 1, r = 0, o = 1, sx = 1) {
+  el.style.transform = `translate(${x}px,${y}px) translate(-50%,-50%) rotate(${r}deg) scale(${s * sx},${s})`;
+  el.style.opacity = o;
+}
+const emo = (c, size) => `<span class="e" style="font-size:${size}px">${c}</span>`;
+
+// "章鱼有[3]颗心脏" -> per-char spans, [] = highlighted
+function charSpans(el, text) {
+  let hl = false, out = [];
+  for (const c of text) {
+    if (c === '[') { hl = true; continue; }
+    if (c === ']') { hl = false; continue; }
+    out.push(`<span class="ch${hl ? ' hl' : ''}">${c === ' ' ? '&nbsp;' : c}</span>`);
+  }
+  el.innerHTML = out.join('');
+  return [...el.querySelectorAll('.ch')];
+}
+function popChars(chars, lt, start, step, wave = true) {
+  chars.forEach((c, i) => {
+    const k = p(lt, start + i * step, .38);
+    const s = easeOutBack(k);
+    const wy = wave ? 7 * S(TAU * lt * 1.4 - i * .55) * clamp(k * 2 - 1) : 0;
+    c.style.transform = `translateY(${(1 - k) * 70 + wy}px) scale(${s})`;
+    c.style.opacity = k > 0 ? 1 : 0;
+  });
+}
+
+// ---------- timeline ----------
+const T_END = 38.5;
+const root = document.getElementById('root');
+const SCENES = [];
+
+function makeScene(start, dur, bg, opts = {}) {
+  const el = mk(root, 'scene');
+  el.style.zIndex = SCENES.length + 1;
+  const bgEl = mk(el, 'bg', '', `background:linear-gradient(165deg, ${bg[0]}, ${bg[1]})`);
+  let burst = null;
+  if (opts.burst) {
+    burst = mk(el, 'burst', '', `background:repeating-conic-gradient(from 0deg, ${opts.burst[0]} 0deg 9deg, ${opts.burst[1]} 9deg 18deg)`);
+    mk(el, 'glow', '', 'background:radial-gradient(circle at 50% 44%, rgba(255,255,255,.6), rgba(255,255,255,0) 55%)');
+  }
+  const dots = mk(el, 'dots');
+  const blobs = [0, 1, 2].map(i => mk(el, 'blob', '', `width:${[380, 260, 520][i]}px;height:${[380, 260, 520][i]}px`));
+  const sc = { el, start, dur, burst, dots, blobs, update: () => {} };
+  SCENES.push(sc);
+  return sc;
+}
+function ambient(sc, lt) {
+  sc.dots.style.backgroundPosition = `${lt * 36}px ${lt * 48}px`;
+  if (sc.burst) sc.burst.style.transform = `rotate(${lt * 14}deg)`;
+  const pos = [[140, 380], [960, 1250], [880, 260]];
+  sc.blobs.forEach((b, i) => {
+    place(b, pos[i][0] + 40 * S(lt * .7 + i * 2), pos[i][1] + 50 * S(lt * .55 + i), 1 + .06 * S(lt * 1.1 + i), 0, 1);
+  });
+}
+
+// ===== INTRO =====
+(() => {
+  const sc = makeScene(0, 4, ['#ffe066', '#ffb627'], { burst: ['#ffd23f', '#ffc21a'] });
+  const el = sc.el;
+  const ribbon = mk(el, 'abs sticker', '你绝对不知道的', 'font-size:74px;padding:18px 48px');
+  const l1 = mk(el, 'abs ink', '', 'font-size:280px;--hl:#ff4f8b;-webkit-text-stroke:20px #2b1d3a;text-shadow:0 18px 0 #2b1d3a');
+  const l2 = mk(el, 'abs ink', '', 'font-size:240px;--hl:#ff4f8b;-webkit-text-stroke:20px #2b1d3a;text-shadow:0 18px 0 #2b1d3a');
+  const c1 = charSpans(l1, '动物');
+  const c2 = charSpans(l2, '[冷]知识');
+  const stamp = mk(el, 'abs stamp', '<div style="font-size:110px;line-height:1">5</div><div style="font-size:44px">个</div>');
+  const animals = ['🐙', '🦈', '🦦', '🦩', '🦥'].map(a => mk(el, 'abs', emo(a, 170)));
+  const tip = mk(el, 'abs pill', '一口气看完 <i>→</i>', '--accent:#ff4f8b;font-size:56px');
+  sc.update = lt => {
+    ambient(sc, lt);
+    const kr = easeOutBack(p(lt, .1, .45));
+    place(ribbon, 540, 560 + 8 * S(lt * 3), kr, -5 + 2 * S(lt * 2), p(lt, .1, .05));
+    popChars(c1, lt, .3, .1);
+    popChars(c2, lt, .55, .1);
+    const breathe = 1 + .025 * S(TAU * lt * 1.2);
+    place(l1, 540, 790, breathe, -2);
+    place(l2, 540, 1040, breathe, 2);
+    const ks = p(lt, 1.45, .25);
+    place(stamp, 880, 640, 3 - 2 * easeOut(ks) + .04 * S(lt * 6) * (ks >= 1), 14, ks);
+    animals.forEach((a, i) => {
+      const ang = lt * .9 + i * TAU / 5;
+      const depth = (S(ang) + 1) / 2;
+      const k = easeOutBack(p(lt, .35 + i * .12, .4));
+      place(a, 540 + 390 * Math.cos(ang), 1440 + 120 * S(ang), k * (.7 + .4 * depth), 10 * S(lt * 3 + i), p(lt, .35 + i * .12, .05));
+      a.style.zIndex = Math.round(depth * 10);
+    });
+    place(tip, 540, 1720, easeOutBack(p(lt, 1.9, .4)) * (1 + .04 * S(TAU * lt * 1.5)), 0, p(lt, 1.9, .05));
+  };
+})();
+
+// ===== FACTS =====
+const FACTS = [
+  { no: 1, start: 4, bg: ['#ff9a5b', '#ff4f8b'], accent: '#ff4f8b', hl: '#ffe14d', size: 120,
+    head: '章鱼有[3]颗心脏',
+    card: '两颗心给鳃泵血，一颗心供全身，<br>而且它的血是<b>蓝色</b>的 <span class="e">💙</span>' },
+  { no: 2, start: 10, bg: ['#36b7ff', '#7be0ff'], accent: '#1f7fe0', hl: '#ffe14d', size: 120,
+    head: '鲨鱼比树还要[老]',
+    card: '鲨鱼 <b>4.5 亿年前</b>就在海里游了，<br>那时地球上还没有一棵树 <span class="e">🌳</span>' },
+  { no: 3, start: 16, bg: ['#6a7bff', '#b07bff'], accent: '#6a5bff', hl: '#ffe14d', size: 116,
+    head: '海獭睡觉要[手牵手]',
+    card: '怕睡着后被海浪冲散，<br>它们会<b>牵着同伴的爪子</b>一起漂 <span class="e">🌊</span>' },
+  { no: 4, start: 22, bg: ['#ffe14d', '#ffa83d'], accent: '#ff4f8b', hl: '#ff6fae', size: 108,
+    head: '火烈鸟原本是[灰色]的',
+    card: '小时候羽毛灰扑扑，<br>吃多了含色素的小虾和藻类，<br>才慢慢<b>变成粉红色</b> <span class="e">🦐</span>' },
+  { no: 5, start: 28, bg: ['#8be38a', '#22c1a8'], accent: '#14a085', hl: '#ffe14d', size: 116,
+    head: '树懒能憋气[40]分钟',
+    card: '比海豚憋得还久！而且它在水里<br><b>游泳</b>比在树上爬快多了 <span class="e">🏊</span>' },
+];
+
+const STAGES = {};
+
+function makeFact(f) {
+  const sc = makeScene(f.start, 6, f.bg);
+  const el = sc.el;
+  el.style.setProperty('--accent', f.accent);
+  const stageUpdate = STAGES[f.no](el);
+  const pill = mk(el, 'abs pill', `动物冷知识 · <i>No.${f.no}</i>`);
+  const head = mk(el, 'abs ink', '', `font-size:${f.size}px;--hl:${f.hl}`);
+  const chars = charSpans(head, f.head);
+  const card = mk(el, 'abs card', f.card);
+  const footer = mk(el, 'abs footer', '<span class="e">🐾</span> 关注我，每天涨一个冷知识');
+  sc.update = lt => {
+    ambient(sc, lt);
+    stageUpdate(lt);
+    const kp = p(lt, .15, .5);
+    place(pill, 540, -80 + 290 * easeOutBack(kp), 1, -3 + 1.5 * S(lt * 2.4), 1);
+    popChars(chars, lt, 1.05, .055);
+    const fit = Math.min(1, 930 / head.offsetWidth);
+    place(head, 540, 1170, fit, 0, 1);
+    const kc = p(lt, 1.9, .5);
+    place(card, 540, 1470 + 360 * (1 - easeOutBack(kc)), 1, 0, clamp(kc * 3));
+    place(footer, 540, 1790, 1, 0, p(lt, 2.4, .4));
+  };
+}
+
+// --- No.1 octopus: three blue hearts
+STAGES[1] = el => {
+  const octo = mk(el, 'abs', emo('🐙', 400));
+  const hearts = [[230, 560], [850, 560], [540, 360]].map((pos, i) => {
+    const h = mk(el, 'abs', emo('💙', 150) + `<div class="badge" style="position:absolute;right:-18px;top:-18px">${i + 1}</div>`);
+    return { h, pos };
+  });
+  return lt => {
+    const k = easeOutBack(p(lt, .3, .5));
+    place(octo, 540 + 12 * S(lt * 2), 680 + 18 * S(TAU * lt * .9), k * (1 + .03 * S(TAU * lt * 1.8)), 6 * S(TAU * lt * .7), p(lt, .3, .05));
+    const ph = ((lt % .8) / .8);
+    const beat = Math.exp(-Math.pow((ph - .1) / .05, 2)) + .6 * Math.exp(-Math.pow((ph - .3) / .05, 2));
+    hearts.forEach(({ h, pos }, i) => {
+      const t0 = .9 + i * .32;
+      const kh = easeOutBack(p(lt, t0, .4));
+      place(h, pos[0] + 10 * S(lt * 1.6 + i), pos[1] + 14 * S(lt * 2 + i * 2), kh * (1 + .16 * beat * (lt > t0 + .4)), -8 + 16 * (i / 2), p(lt, t0, .05));
+    });
+  };
+};
+
+// --- No.2 shark vs tree bar chart
+STAGES[2] = el => {
+  const BASE = 960, MAXH = 400;
+  const items = [
+    { x: 340, v: 4.5, color: '#ffd23f', e: '🦈', name: '鲨鱼' },
+    { x: 740, v: 3.9, color: '#7ed957', e: '🌳', name: '树木' },
+  ].map(it => {
+    it.bar = mk(el, 'bar', '', `width:240px;background:${it.color}`);
+    it.num = mk(el, 'abs num', '');
+    it.emo = mk(el, 'abs', emo(it.e, 170));
+    it.lbl = mk(el, 'abs lbl', it.name);
+    return it;
+  });
+  const base = mk(el, 'abs', '', 'width:760px;height:14px;border-radius:7px;background:#2b1d3a');
+  const crown = mk(el, 'abs', emo('👑', 120));
+  const sparks = [0, 1, 2, 3].map(() => mk(el, 'abs', emo('✨', 70)));
+  return lt => {
+    place(base, 540, BASE + 4, easeOut(p(lt, .3, .4)), 0, 1);
+    const kg = easeInOut(p(lt, .8, 1.5));
+    items.forEach((it, i) => {
+      const h = Math.max(0, MAXH * it.v / 4.5 * kg);
+      it.bar.style.height = h + 'px';
+      it.bar.style.transform = `translate(${it.x - 120}px, ${BASE - h}px)`;
+      it.bar.style.display = h > 2 ? 'block' : 'none';
+      it.num.textContent = (it.v * kg).toFixed(1) + ' 亿年';
+      place(it.num, it.x, BASE - h + 46, 1, 0, h > 70 ? 1 : 0);
+      const ke = easeOutBack(p(lt, .35 + i * .15, .45));
+      const wig = i === 0 ? 8 * S(TAU * lt * 1.3) : 3 * S(TAU * lt);
+      place(it.emo, it.x, BASE - h - 88, ke, wig, p(lt, .35 + i * .15, .05), i === 0 ? -1 : 1);
+      place(it.lbl, it.x, BASE + 62, easeOutBack(p(lt, .5 + i * .1, .4)), 0, p(lt, .5 + i * .1, .05));
+    });
+    const sharkTop = BASE - MAXH - 88;
+    const kc = p(lt, 2.45, .6);
+    place(crown, 340, -150 + (sharkTop - 105 + 150) * easeOutBounce(kc), 1, -14 + 4 * S(lt * 3), kc > 0 ? 1 : 0);
+    sparks.forEach((s, i) => {
+      const ks = p(lt, 2.75 + i * .08, .7);
+      const ang = -2.4 + i * .9;
+      const r = 120 + 110 * easeOut(ks);
+      place(s, 340 + r * Math.cos(ang), sharkTop - 40 + r * S(ang), (1 - ks) * 1.3 + .2, 0, ks > 0 && ks < 1 ? 1 : 0);
+    });
+  };
+};
+
+// --- No.3 sea otters holding hands while sleeping
+STAGES[3] = el => {
+  const moon = mk(el, 'abs', emo('🌙', 140));
+  const stars = [[150, 330], [300, 460], [800, 520], [960, 640], [120, 620]].map(pos => ({ s: mk(el, 'abs', emo('⭐', 54)), pos }));
+  const waveSvg = (fill, amp, y0) => `<svg width="2400" height="1300" viewBox="0 0 2400 1300"><path fill="${fill}" d="${
+    (() => { let d = `M0 ${y0}`; for (let x = 0; x <= 2400; x += 20) d += ` L${x} ${y0 + amp * Math.sin(x / 1200 * TAU * 4)}`; return d + ' L2400 1300 L0 1300 Z'; })()}"/></svg>`;
+  const back = mk(el, 'abs', waveSvg('rgba(255,255,255,.28)', 22, 40));
+  const z = [0, 1, 2].map(() => mk(el, 'abs', emo('💤', 86)));
+  const o1 = mk(el, 'abs', emo('🦦', 280));
+  const o2 = mk(el, 'abs', emo('🦦', 280));
+  const heart = mk(el, 'abs', emo('❤️', 90));
+  const front = mk(el, 'abs', waveSvg('rgba(140,220,255,.55)', 26, 40));
+  return lt => {
+    place(moon, 900, 360 + 8 * S(lt * 1.5), easeOutBack(p(lt, .3, .5)), -20 + 6 * S(lt * 1.3), p(lt, .3, .05));
+    stars.forEach(({ s, pos }, i) => place(s, pos[0], pos[1], easeOutBack(p(lt, .4 + i * .1, .4)) * (.8 + .25 * S(lt * 4 + i * 1.7)), lt * 30, p(lt, .4 + i * .1, .05)));
+    const wb = p(lt, 0, .6);
+    back.style.transform = `translate(${-((lt * 90) % 600) - 300}px, ${780 + 300 * (1 - easeOut(wb))}px)`;
+    front.style.transform = `translate(${-((lt * 150 + 300) % 600)}px, ${830 + 300 * (1 - easeOut(wb))}px)`;
+    const ko = easeOutBack(p(lt, .35, .5));
+    const b1 = 14 * S(TAU * lt * .8), b2 = 14 * S(TAU * lt * .8 + 1.2);
+    place(o1, 395, 740 + b1 + 300 * (1 - ko), 1, 7 * S(TAU * lt * .5), p(lt, .35, .05), -1);
+    place(o2, 685, 740 + b2 + 300 * (1 - ko), 1, -7 * S(TAU * lt * .5 + 1), p(lt, .35, .05));
+    const kh = easeOutBack(p(lt, 1.0, .4));
+    place(heart, 540, 700 + (b1 + b2) / 2, kh * (1 + .12 * S(TAU * lt * 2)), 0, p(lt, 1.0, .05));
+    z.forEach((zz, j) => {
+      const ph = (((lt - .9) / 2.1) + j / 3) % 1;
+      const on = lt > .9 + j * .7;
+      place(zz, 540 + 80 * S(ph * 7 + j), 560 - ph * 260, .6 + ph * .6, -10 + 20 * ph, on ? S(ph * Math.PI) : 0);
+    });
+  };
+};
+
+// --- No.4 flamingo turns from grey to pink by eating shrimp
+STAGES[4] = el => {
+  const N = 6;
+  const fl = mk(el, 'abs', emo('🦩', 420));
+  const shrimps = [...Array(N)].map(() => mk(el, 'abs', emo('🦐', 120)));
+  const sparks = [...Array(N)].map(() => mk(el, 'abs', emo('✨', 160)));
+  const tag = mk(el, 'abs sticker', '变粉啦！', 'background:#ff4f8b');
+  const T0 = .85, STEP = .28, FLY = .5;
+  return lt => {
+    let eaten = 0;
+    shrimps.forEach((s, i) => {
+      const t0 = T0 + i * STEP;
+      const k = p(lt, t0, FLY);
+      const left = i % 2 === 0;
+      const sx = left ? -120 : 1200, sy = 420 + (i * 170) % 520;
+      const ex = 540, ey = 600;
+      const x = sx + (ex - sx) * easeInOut(k);
+      const y = sy + (ey - sy) * k - 220 * S(Math.PI * k);
+      place(s, x, y, 1 - .55 * k, (left ? 1 : -1) * k * 540, k > 0 && k < 1 ? 1 : 0, left ? -1 : 1);
+      eaten += easeOut(p(lt, t0 + FLY, .25));
+      const ks = p(lt, t0 + FLY, .45);
+      place(sparks[i], 540 + (left ? -70 : 70), 560 - 30 * i % 90, .4 + ks, ks * 40, ks > 0 && ks < 1 ? 1 - ks : 0);
+    });
+    const g = 1 - eaten / N;
+    fl.firstChild.style.filter = `grayscale(${g}) brightness(${1 + .12 * g}) contrast(${1 - .15 * g})`;
+    const done = p(lt, T0 + (N - 1) * STEP + FLY + .1, .5);
+    const kf = easeOutBack(p(lt, .3, .5));
+    const hop = done > 0 ? -Math.abs(S(TAU * lt * 1.2)) * 40 : 0;
+    const chew = eaten > 0 && g > 0 ? .04 * S(lt * 40) : 0;
+    place(fl, 540, 690 + 10 * S(TAU * lt * .8) + hop, kf * (1 + chew + .06 * easeOutBack(done)), 5 * S(TAU * lt * .6), p(lt, .3, .05));
+    place(tag, 830, 420, easeOutBack(done) * (1 + .05 * S(TAU * lt * 2)), 10, done > 0 ? 1 : 0);
+  };
+};
+
+// --- No.5 sloth holds breath 40 minutes
+STAGES[5] = el => {
+  const bubbles = [...Array(12)].map((_, i) => {
+    const sz = 30 + (i * 37) % 60;
+    return { b: mk(el, 'bubble', '', `width:${sz}px;height:${sz}px`), i };
+  });
+  const sloth = mk(el, 'abs', emo('🦥', 360));
+  const timer = mk(el, 'abs timer', '<span class="e" style="font-size:66px">⏱️</span><span class="d">00:00</span>');
+  const digits = timer.querySelector('.d');
+  return lt => {
+    bubbles.forEach(({ b, i }) => {
+      const sp = .35 + (i % 4) * .08;
+      const ph = (lt * sp + i * .137) % 1;
+      const x = 150 + ((i * 263) % 780) + 30 * S(lt * 2 + i);
+      const y = 1020 - ph * 800;
+      place(b, x, y, 1, 0, p(lt, .3, .5) * S(ph * Math.PI));
+    });
+    const ks = easeOutBack(p(lt, .3, .5));
+    place(sloth, 440 + 20 * S(TAU * lt * .4), 700 + 22 * S(TAU * lt * .6), ks, 10 * S(TAU * lt * .45), p(lt, .3, .05));
+    const kt = p(lt, .75, .45);
+    const m = 40 * easeInOut(p(lt, .9, 1.9));
+    const mm = Math.floor(m), ss = Math.floor((m % 1) * 60);
+    digits.textContent = `${String(mm).padStart(2, '0')}:${String(mm >= 40 ? 0 : ss).padStart(2, '0')}`;
+    const fin = p(lt, 2.8, .4);
+    digits.style.color = fin > 0 ? '#ff3d6e' : '#2b1d3a';
+    place(timer, 790, 410, easeOutBack(kt) * (1 + .12 * easeOutElastic(fin) - .12 * (fin > 0) + .1 * (fin > 0)), -6 + 3 * S(lt * 3), kt > 0 ? 1 : 0);
+  };
+};
+
+FACTS.forEach(makeFact);
+
+// ===== OUTRO =====
+(() => {
+  const sc = makeScene(34, 4.5, ['#b06bff', '#ff6cab'], { burst: ['#ff7fbf', '#ff6aae'] });
+  const el = sc.el;
+  const l1 = mk(el, 'abs ink', '', 'font-size:150px;--hl:#ffe14d');
+  const l2 = mk(el, 'abs ink', '', 'font-size:170px;--hl:#ffe14d');
+  const c1 = charSpans(l1, '你最喜欢');
+  const c2 = charSpans(l2, '[哪一只]？');
+  const row = ['🐙', '🦈', '🦦', '🦩', '🦥'].map(a => mk(el, 'abs', emo(a, 150)));
+  const btns = ['<span class="e">👍</span> 点赞', '<span class="e">⭐</span> 收藏', '<span class="e">➕</span> 关注'].map(h => mk(el, 'abs btn', h));
+  const next = mk(el, 'abs sticker', '下期更离谱 <span class="e">👀</span>', 'background:#2b1d3a;font-size:60px');
+  sc.update = lt => {
+    ambient(sc, lt);
+    popChars(c1, lt, .35, .08);
+    popChars(c2, lt, .65, .08);
+    place(l1, 540, 520, 1, -2);
+    place(l2, 540, 720, 1, 2);
+    row.forEach((a, i) => {
+      const k = easeOutBack(p(lt, .9 + i * .1, .4));
+      const jump = -Math.max(0, S(TAU * (lt * 1.2) - i * .8)) * 70 * (lt > 1.5);
+      place(a, 540 + (i - 2) * 195, 1040 + jump, k, 8 * S(TAU * lt + i), p(lt, .9 + i * .1, .05));
+    });
+    btns.forEach((b, i) => {
+      const t0 = 1.6 + i * .2;
+      const pulse = Math.max(0, S(TAU * (lt * .8) - i * 1.2));
+      place(b, 540 + (i - 1) * 330, 1340, easeOutBack(p(lt, t0, .4)) * (1 + .08 * Math.pow(pulse, 6)), 0, p(lt, t0, .05));
+    });
+    place(next, 540, 1600, easeOutBack(p(lt, 2.4, .45)), -4 + 2 * S(lt * 3), p(lt, 2.4, .05));
+  };
+})();
+
+// transition rings + progress bar
+const rings = SCENES.slice(1).map(() => mk(root, 'ring'));
+const prog = mk(root, '', '<div></div>'); prog.id = 'prog';
+const progFill = prog.firstChild;
+
+const WIPE = .55, RMAX = 2250;
+window.render = t => {
+  SCENES.forEach((sc, i) => {
+    const lt = t - sc.start;
+    const nx = SCENES[i + 1];
+    const vis = lt >= 0 && (!nx || t < nx.start + WIPE + .02);
+    sc.el.style.display = vis ? 'block' : 'none';
+    if (!vis) return;
+    if (i > 0) {
+      const k = easeInOut(p(lt, 0, WIPE));
+      sc.el.style.clipPath = k < 1 ? `circle(${k * RMAX}px at 540px 960px)` : 'none';
+      const ring = rings[i - 1];
+      if (k < 1) {
+        const r = k * RMAX + 18;
+        ring.style.display = 'block';
+        ring.style.width = ring.style.height = 2 * r + 'px';
+        ring.style.transform = `translate(${540 - r}px, ${960 - r}px)`;
+        ring.style.zIndex = 50 + i;
+      } else ring.style.display = 'none';
+    }
+    sc.update(lt);
+  });
+  progFill.style.width = (clamp(t / T_END) * 100) + '%';
+};
+window.T_END = T_END;
+render(0);
+</script>
+</body>
+</html>
