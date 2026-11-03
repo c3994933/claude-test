@@ -15,3 +15,14 @@ python3 render.py 1080 full out.mp4            # final video
 Timeline (audio seconds): intro 2.55–10.55 (title letters per beat, fuel fills, countdown),
 drop at 10.55 (flash + GO!!), main 10.55–26.54 (palette per bar, car hops on backbeats,
 exhaust flames on dembow off-beats, BOUNCE bar), outro 26.54–29.6 (out of fuel, fade).
+
+## 一拍 = 视野放大 10 倍 (`scale.py`)
+
+Science version: every beat zooms out ×10, from 10^-12 m (inside an atom) to 10^26 m
+(observable universe). Beat 12 (the drop) lands on 10^0 m, "you". Each level has a
+procedurally drawn object, a name, a one-line fact and a log-scale ruler.
+
+```bash
+python3 scale.py 270 preview 5.0,10.6,20.0 sheet.png   # stills
+python3 scale.py 1080 full cosmic_zoom.mp4             # final video
+```
