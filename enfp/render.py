@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from timeline import B, BAR, DUR, T
+from timeline import B, BAR, DUR, E_PEOPLE, N_STEP, P_STEP, T, T0, bt
 
 W, H, FPS = 1920, 1080, 30
 NFRAMES = int(round(DUR * FPS))
@@ -567,7 +567,7 @@ RING_R = [260, 540, 860, 1250]
 
 
 def spark_path(t):
-    s = ease_out(seg(t, T["arrive"], T["arrive"] + 1.7))
+    s = ease_out(seg(t, T["arrive"], T["arrive"] + 1.3))
     p = bez((-120, 640), (420, 780), (640, 360), C0, 2)
     pts = bez((-120, 640), (420, 780), (640, 360), C0, 200)
     return trim(pts, 0, max(1e-4, s))[-1] if s > 0 else np.array([-200.0, 640.0])
@@ -626,9 +626,9 @@ def scene_intro(L, out_texts, t):
         ring(L, C0, t, T["warm"] + k * B, RING_R[k], 0.55, WARMS[k % 3], 0.9, 3.0)
 
     hi = T["warm"] + 0.05
-    fo = T["gather"] + 0.4
-    out_texts.append(lambda o: text_line(o, t, [("有一种人", CREAM, 0.45)], 960, 790, 46, t_out=fo))
-    out_texts.append(lambda o: text_line(o, t, [("一出现，", CREAM, T["arrive"] + 0.1), ("空气", CREAM, hi),
+    fo = T["gather"] + 0.9
+    out_texts.append(lambda o: text_line(o, t, [("有一种人", CREAM, T0 + 0.1)], 960, 790, 46, t_out=fo))
+    out_texts.append(lambda o: text_line(o, t, [("一出现，", CREAM, T["arrive"]), ("空气", CREAM, hi),
                                                 ("就变热了", CORAL, hi + B)], 960, 856, 46, t_out=fo))
 
 
@@ -650,12 +650,12 @@ def scene_drop(L, out_texts, t):
                                          tx, 650, 26, "sans", speed=0.02, tracking=2, glow=0.0, rise=6))
 
 
-CROWD_X = [260 + 320 * k for k in range(5)]
+CROWD_X = [330 + 350 * k for k in range(E_PEOPLE)]
 GROUND_Y = 860
 
 
 def run_x(t):
-    return 260 + (t - T["e_light0"]) * 480
+    return 330 + (t - T["e_light0"]) * 525
 
 
 def scene_e(L, out_texts, t):
@@ -682,9 +682,9 @@ def scene_e(L, out_texts, t):
     stick(L, pose, (x, GROUND_Y), 1.35, CORAL, 1.0, dress=True, hair=True, t=t, th=2.8,
           heart=1.0, sparkler=True, spark_seed=40.0, tsec=t)
     e0 = T["e"]
-    out_texts.append(lambda o: tag(o, t, "E", "外向", 960, 170, e0 + 0.1, T["n"] - 0.25))
-    out_texts.append(lambda o: text_line(o, t, [("走到哪", CREAM, e0 + 0.25)], 960, 240, 50, t_out=T["n"] - 0.25))
-    out_texts.append(lambda o: text_line(o, t, [("哪就亮", GOLD, e0 + 3 * B)], 960, 310, 50, t_out=T["n"] - 0.25))
+    out_texts.append(lambda o: tag(o, t, "E", "外向", 960, 170, e0 + 0.05, T["n"] - 0.2))
+    out_texts.append(lambda o: text_line(o, t, [("走到哪", CREAM, e0 + 0.12)], 960, 240, 50, t_out=T["n"] - 0.2))
+    out_texts.append(lambda o: text_line(o, t, [("哪就亮", GOLD, e0 + 2 * B)], 960, 310, 50, t_out=T["n"] - 0.2))
 
 
 def _tree():
@@ -712,23 +712,23 @@ def scene_n(L, out_texts, t):
     n0 = T["n"]
     tip, _ = hero(L, t, HERO_N, 0.74, seed=51.0)
     for i, (lvl, p, q) in enumerate(TREE):
-        tg = n0 + lvl * B
-        f = ease_out(seg(t, tg, tg + 0.32))
+        tg = n0 + lvl * N_STEP
+        f = ease_out(seg(t, tg, tg + 0.22))
         if f <= 0:
             continue
         a, b = tip + p, tip + p + (q - p) * f
         c = WARMS[(lvl + i) % 3]
         poly(L, np.array([a, b]), c, 0.95, 2.8 - lvl * 0.25)
         if f >= 1:
-            fl = math.exp(-(t - tg - 0.32) * 5)
+            fl = math.exp(-(t - tg - 0.22) * 5)
             dot(L, tip + q, 3.2 + 4 * fl, mixc(c, CREAM, 0.5))
             if lvl == 5:
                 tw = 0.6 + 0.4 * math.sin(t * 7 + i)
                 dot(L, tip + q, 3.5, GOLD, tw)
-    out_texts.append(lambda o: tag(o, t, "N", "直觉", 1500, 790, n0 + 0.1, T["f"] - 0.25))
-    out_texts.append(lambda o: text_line(o, t, [("一个点子", CREAM, n0 + 0.25)], 1500, 860, 50, t_out=T["f"] - 0.25))
-    out_texts.append(lambda o: text_line(o, t, [("能长出", CREAM, n0 + 3 * B), ("一百个", GOLD, n0 + 3 * B + 0.17)],
-                                         1500, 930, 50, t_out=T["f"] - 0.25))
+    out_texts.append(lambda o: tag(o, t, "N", "直觉", 1500, 790, n0 + 0.05, T["f"] - 0.2))
+    out_texts.append(lambda o: text_line(o, t, [("一个点子", CREAM, n0 + 0.12)], 1500, 860, 50, t_out=T["f"] - 0.2))
+    out_texts.append(lambda o: text_line(o, t, [("能长出", CREAM, n0 + 2 * B), ("一百个", GOLD, n0 + 2 * B + 0.17)],
+                                         1500, 930, 50, t_out=T["f"] - 0.2))
 
 
 SAD = np.array([1250.0, 880.0])
@@ -767,10 +767,10 @@ def scene_f(L, out_texts, t):
     else:
         pose_h = blend_pose(stick_pose("stand", t=t), stick_pose("reach"), smooth(seg(t, tt - 0.35, tt)))
     stick(L, pose_h, (wx, SAD[1]), 1.5, CORAL, 1.0, dress=True, hair=True, t=t, th=2.8, heart=1.0)
-    out_texts.append(lambda o: tag(o, t, "F", "情感", 420, 200, f0 + 0.1, T["p"] - 0.25))
-    out_texts.append(lambda o: text_line(o, t, [("别人的情绪", CREAM, f0 + 0.25)], 420, 270, 50, t_out=T["p"] - 0.25))
+    out_texts.append(lambda o: tag(o, t, "F", "情感", 420, 200, f0 + 0.05, T["p"] - 0.2))
+    out_texts.append(lambda o: text_line(o, t, [("别人的情绪", CREAM, f0 + 0.12)], 420, 270, 50, t_out=T["p"] - 0.2))
     out_texts.append(lambda o: text_line(o, t, [("她都", CREAM, tt), ("接得住", CORAL, tt + 0.12)], 420, 340, 50,
-                                         t_out=T["p"] - 0.25))
+                                         t_out=T["p"] - 0.2))
     return warmth
 
 
@@ -812,8 +812,8 @@ def scene_p(L, out_texts, t):
     p0 = T["p"]
     tip, _ = hero(L, t, HERO_P, 0.6, seed=71.0)
     for k, (kind, c, sc) in enumerate(SHAPES):
-        ts = p0 + k * B
-        f = seg(t, ts, ts + 0.42)
+        ts = p0 + k * P_STEP
+        f = seg(t, ts, ts + 0.28)
         if f <= 0:
             continue
         pts = shape_pts(kind)
@@ -822,23 +822,23 @@ def scene_p(L, out_texts, t):
             pts = pts * 14
         pts = np.asarray(c) + pts * sc
         colr = WARMS[k % 3]
-        fade = 1 - 0.45 * seg(t, ts + 0.6, ts + 2.5)
+        fade = 1 - 0.4 * seg(t, ts + 0.5, ts + 2.0)
         sub = trim(pts, 0, ease_out(f)) if f < 1 else pts
         poly(L, sub, colr, fade, 3.0, closed=(kind in ("star",)) and f >= 1)
         if f < 1:
             head = sub[-1]
             dot(L, head, 5, CREAM)
-            sparks(L, lambda te, pts=pts, ts=ts: trim(pts, 0, max(1e-3, ease_out(seg(te, ts, ts + 0.42))))[-1],
-                   t, ts, ts + 0.42, rate=160, life=(0.15, 0.45), speed=(60, 220), g=380, seed=80 + k, th=1.4)
+            sparks(L, lambda te, pts=pts, ts=ts: trim(pts, 0, max(1e-3, ease_out(seg(te, ts, ts + 0.28))))[-1],
+                   t, ts, ts + 0.28, rate=160, life=(0.15, 0.45), speed=(60, 220), g=380, seed=80 + k, th=1.4)
         else:
-            burst(L, pts[-1], t, ts + 0.42, n=14, speed=(100, 260), life=0.6, seed=90 + k, th=1.5, g=300)
+            burst(L, pts[-1], t, ts + 0.28, n=14, speed=(100, 260), life=0.6, seed=90 + k, th=1.5, g=300)
         # thin light thread from the sparkler to the drawing head
         if 0 < f < 1:
             line(L, tip, sub[-1], GOLD, 0.25, 1.0)
-    out_texts.append(lambda o: tag(o, t, "P", "感知", 1300, 760, p0 + 0.1, T["end"] - 0.25))
-    out_texts.append(lambda o: text_line(o, t, [("三分钟热度？", CREAM, p0 + 0.25)], 1300, 830, 50, t_out=T["end"] - 0.25))
-    out_texts.append(lambda o: text_line(o, t, [("是每三分钟", CREAM, p0 + 3 * B), ("一次心动", PINK, p0 + 3 * B + 0.3)],
-                                         1300, 900, 50, t_out=T["end"] - 0.25))
+    out_texts.append(lambda o: tag(o, t, "P", "感知", 1300, 760, p0 + 0.05, T["end"] - 0.2))
+    out_texts.append(lambda o: text_line(o, t, [("三分钟热度？", CREAM, p0 + 0.12)], 1300, 830, 50, t_out=T["end"] - 0.2))
+    out_texts.append(lambda o: text_line(o, t, [("是每三分钟", CREAM, p0 + 2 * B), ("一次心动", PINK, p0 + 2 * B + 0.3)],
+                                         1300, 900, 50, t_out=T["end"] - 0.2))
 
 
 LONE = np.array([1150.0, 780.0])
@@ -851,12 +851,12 @@ def scene_end(L, out_texts, t):
     poly(L, np.array([[-200, LONE[1]], [2200, LONE[1]]]), mixc(COLD, CORAL, wf), 0.4 + 0.3 * wf, 1.3, core=False)
     lone_c = mixc(ICE, GOLD, ease_out(wf))
     stick(L, stick_pose("sit"), LONE, 1.05, lone_c, 0.85, flip=-1, t=t, th=2.4, heart=wf)
-    walk = seg(t, e0, e0 + 1.35)
+    walk = seg(t, e0, e0 + 2 * B)
     x = 520 + (1010 - 520) * smooth(walk)
     if walk < 1:
         pose = stick_pose("walk", ph=(t - e0) / B * 0.5)
     else:
-        pose = blend_pose(stick_pose("stand", t=t), stick_pose("sit"), smooth(seg(t, e0 + 1.35, e0 + 1.85)))
+        pose = blend_pose(stick_pose("stand", t=t), stick_pose("sit"), smooth(seg(t, e0 + 2 * B, e0 + 2.75 * B)))
     stick(L, pose, (x, LONE[1]), 1.05, CORAL, 1.0, dress=True, hair=True, t=t, th=2.6, heart=1.0)
     if t > pop - 0.25:
         k = seg(t, pop - 0.25, pop)
@@ -864,9 +864,9 @@ def scene_end(L, out_texts, t):
             line(L, (POP[0], LONE[1] - 20), (POP[0], LONE[1] - 20 - (LONE[1] - 20 - POP[1]) * ease_out(k)), GOLD, 0.9, 2.0)
     burst(L, POP, t, pop, n=40, speed=(260, 620), life=1.5, seed=101.0, th=2.2, g=120)
     burst(L, POP, t, pop + 0.12, n=26, speed=(120, 300), life=1.4, seed=102.0, th=1.6, g=160)
-    hi = e0 + 0.15
+    hi = e0 + 0.1
     out_texts.append(lambda o: text_line(o, t, [("别人嫌她太吵", CREAM, hi)], 960, 200, 48, t_out=T["outro"] - 0.2, speed=0.07))
-    out_texts.append(lambda o: text_line(o, t, [("其实她只是", CREAM, e0 + 2 * B)], 960, 268, 48, t_out=T["outro"] - 0.2, speed=0.07))
+    out_texts.append(lambda o: text_line(o, t, [("其实她只是", CREAM, bt(36))], 960, 268, 48, t_out=T["outro"] - 0.2, speed=0.07))
     out_texts.append(lambda o: text_line(o, t, [("怕你太冷", CORAL, pop + 0.05)], 960, 352, 64, t_out=T["outro"] - 0.2,
                                          speed=0.1, glow=0.45))
     return wf
@@ -874,19 +874,19 @@ def scene_end(L, out_texts, t):
 
 def scene_outro(L, out_texts, t):
     o0 = T["outro"]
-    k = seg(t, o0, o0 + 0.7)
+    k = seg(t, o0, o0 + 0.5)
     c = np.array([960.0, 430.0])
-    r = 8 + 4 * math.sin(t * 6) * seg(t, o0 + 0.7, o0 + 1.0)
+    r = 8 + 4 * math.sin(t * 6) * seg(t, o0 + 0.5, o0 + 0.8)
     dot(L, c, r, CREAM)
     if k < 1:
         for j in range(3):
             poly(L, arc(c, 900 * (1 - ease_in(k)) * (1 - j * 0.25) + 10, 0, 2 * np.pi, 120), WARMS[j], 0.7, 2.0)
-    ring(L, c, t, o0 + 0.7, 160, 0.9, CORAL, 0.9, 2.0)
-    poly(L, trim(arc(c, 60, -np.pi / 2, 1.5 * np.pi, 90), 0, ease_out(seg(t, o0 + 0.75, o0 + 1.4))), CORAL, 0.9, 1.6)
-    sparks(L, lambda te: c, t, o0 + 0.7, DUR, rate=40, life=(0.3, 0.8), speed=(40, 140), g=60, seed=120.0, th=1.2)
-    out_texts.append(lambda o: text_line(o, t, [("ENFP", CREAM, o0 + 0.8)], 960, 580, 64, "latin", tracking=26, speed=0.08, glow=0.3))
-    out_texts.append(lambda o: text_line(o, t, [("竞选者", CREAM, o0 + 1.1)], 960, 670, 60, "serif", tracking=12, speed=0.1))
-    out_texts.append(lambda o: text_line(o, t, [("MBTI 系列  ·  @你的账号", (230, 190, 180), o0 + 1.45)], 960, 745, 24, "sans",
+    ring(L, c, t, o0 + 0.5, 160, 0.9, CORAL, 0.9, 2.0)
+    poly(L, trim(arc(c, 60, -np.pi / 2, 1.5 * np.pi, 90), 0, ease_out(seg(t, o0 + 0.5, o0 + 1.0))), CORAL, 0.9, 1.6)
+    sparks(L, lambda te: c, t, o0 + 0.5, DUR, rate=40, life=(0.3, 0.8), speed=(40, 140), g=60, seed=120.0, th=1.2)
+    out_texts.append(lambda o: text_line(o, t, [("ENFP", CREAM, o0 + 0.45)], 960, 580, 64, "latin", tracking=26, speed=0.08, glow=0.3))
+    out_texts.append(lambda o: text_line(o, t, [("竞选者", CREAM, o0 + 0.75)], 960, 670, 60, "serif", tracking=12, speed=0.1))
+    out_texts.append(lambda o: text_line(o, t, [("MBTI 系列  ·  @你的账号", (230, 190, 180), o0 + 1.05)], 960, 745, 24, "sans",
                                          tracking=3, speed=0.02, glow=0.0, rise=4))
 
 
@@ -895,7 +895,8 @@ def scene_outro(L, out_texts, t):
 
 def shake_amp(t):
     kicks = [(T["drop"], 26), (T["e"], 7), (T["n"], 7), (T["f"], 7), (T["p"], 7), (T["pop"], 8)]
-    kicks += [(T["e_light0"] + k * B, 5) for k in range(5)]
+    kicks += [(T["e_light0"] + k * B, 5) for k in range(E_PEOPLE)]
+    kicks += [(T["n"] + 2 * B, 5), (T["p"] + 2 * B, 5), (T["end"], 6)]
     kicks += [(T["f_touch"] + k * B, 4) for k in range(4)]
     sx = sy = 0.0
     for tb, a in kicks:
@@ -969,7 +970,7 @@ def render(i):
         wf = scene_end(L, texts, t)
         warmth = 0.05 + 0.85 * wf
     else:
-        warmth = 0.9 * (1 - seg(t, T["outro"], T["outro"] + 0.7)) + 0.35
+        warmth = 0.9 * (1 - seg(t, T["outro"], T["outro"] + 0.5)) + 0.35
         draw_stars(L, t, CREAM, 0.5)
         scene_outro(L, texts, t)
 
@@ -1025,12 +1026,21 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     tmp_v = out + ".video.mp4"
     tmp_a = out + ".audio.wav"
-    sys.path.insert(0, here)
-    import audio
-    audio.build(tmp_a)
+    bgm = os.environ.get("BGM")
+    if bgm:
+        # BGM_START = where the BGM's timeline starts in that file (its beat 0 sits T0 after it)
+        start = float(os.environ.get("BGM_START", "0"))
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.3f}", "-t", f"{DUR:.3f}", "-i", bgm,
+                        "-af", f"loudnorm=I=-15:TP=-1.5:LRA=11,afade=t=out:st={DUR - 0.6:.2f}:d=0.6",
+                        "-ac", "2", "-ar", "48000", tmp_a], check=True)
+    else:
+        sys.path.insert(0, here)
+        import audio
+        audio.build(tmp_a)
     ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
-                           "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "medium",
-                           "-crf", "19", "-pix_fmt", "yuv420p", tmp_v], stdin=subprocess.PIPE)
+                           "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "slow",
+                           "-b:v", "4500k", "-maxrate", "6M", "-bufsize", "9M", "-pix_fmt", "yuv420p", tmp_v],
+                          stdin=subprocess.PIPE)
     with Pool(int(os.environ.get("JOBS", os.cpu_count() or 2))) as pool:
         for k, buf in enumerate(pool.imap(render, range(NFRAMES), chunksize=4)):
             ff.stdin.write(buf)

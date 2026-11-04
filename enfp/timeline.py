@@ -1,23 +1,36 @@
-"""Shared beat grid for the ENFP draft (90 BPM, 4/4)."""
+"""Beat grid for the ENFP draft, locked to the reference BGM (90 BPM, 4/4).
+
+Beat k of the music lands at bt(k) = T0 + k * B. The music's full groove (the drop)
+comes in on beat 12, and the track fades out at about 29.2 s.
+"""
 BPM = 90
 B = 60 / BPM          # one beat  = 0.667 s
 BAR = 4 * B           # one bar   = 2.667 s
+T0 = 0.15             # first beat of the BGM, seconds from video start
+
+
+def bt(k):
+    return T0 + k * B
+
 
 T = {
     "intro": 0.0,
-    "arrive": 1 * BAR,            # spark flies in
-    "warm": 2 * BAR,              # rings warm the crowd
-    "gather": 3 * BAR,            # everything pulls in
-    "silence": 4 * BAR - B / 2,   # half-beat of black
-    "drop": 4 * BAR,              # 10.67  explosion + title
-    "e": 5 * BAR,                 # 13.33  E
-    "e_light0": 5 * BAR + B,      # first person lights up
-    "n": 5 * BAR + 6 * B,         # 17.33  N
-    "f": 5 * BAR + 12 * B,        # 21.33  F
-    "f_touch": 5 * BAR + 14 * B,  # 22.67  touch
-    "p": 5 * BAR + 18 * B,        # 25.33  P
-    "end": 5 * BAR + 24 * B,      # 29.33  slow ending
-    "pop": 5 * BAR + 26 * B,      # 30.67  small firework
-    "outro": 12 * BAR,            # 32.00  logo
+    "arrive": bt(2),              # spark flies in
+    "warm": bt(4),                # rings warm the crowd, one per beat (4..7)
+    "gather": bt(8),              # everything swirls in
+    "silence": bt(11.5),          # half-beat of black
+    "drop": bt(12),               # 8.15  explosion + title
+    "e": bt(16),                  # 10.82 E: one person lights up per beat (16..19)
+    "e_light0": bt(16),
+    "n": bt(20),                  # 13.48 N: tree splits every half-beat
+    "f": bt(24),                  # 16.15 F
+    "f_touch": bt(26),            # 17.48 touch (strong hit), warm rings 26..29
+    "p": bt(30),                  # 20.15 P: a new doodle every half-beat
+    "end": bt(34),                # 22.82 ending
+    "pop": bt(38),                # 25.48 small firework
+    "outro": bt(40),              # 26.82 logo
 }
-DUR = 13 * BAR                    # 34.67 s
+E_PEOPLE = 4
+N_STEP = B / 2
+P_STEP = B / 2
+DUR = 29.2
