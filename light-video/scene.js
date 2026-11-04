@@ -817,6 +817,33 @@ function renderTime(t) {
   ctx.globalAlpha = 1;
 }
 
+// ================================================================ cover image
+function renderCover() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.filter = 'none'; ctx.shadowBlur = 0; ctx.letterSpacing = '0px';
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = 1010, s = 0.86;
+  drawEye(0.7, cx, cy, s, 118);
+  // the sunbeam striking the pupil
+  const sx = W * 1.1, sy = -120;
+  ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+  for (const [w, a] of [[90, 0.06], [36, 0.2], [12, 0.65], [4, 1]]) { ctx.globalAlpha = a; ctx.strokeStyle = '#ffd27a'; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(cx, cy); ctx.stroke(); }
+  softGlow(cx, cy, 520, [255, 200, 120], 0.55);
+  spr(glow('#ffffff'), cx, cy, 150, 1);
+  spr(glow('#ffe7b0'), cx, cy, 520, 0.8, 6, 0.06);
+  ctx.globalCompositeOperation = 'source-over';
+  // darken top and bottom so the type reads
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, 'rgba(8,3,2,0.92)'); g.addColorStop(0.3, 'rgba(8,3,2,0.25)'); g.addColorStop(0.68, 'rgba(8,3,2,0.25)'); g.addColorStop(0.9, 'rgba(8,3,2,0.92)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  txt('你此刻看到的阳光', W / 2, 330, { size: 74, weight: 800, spacing: 8, shadow: SHADOW, shadowBlur: 30 });
+  txt('已经走了十几万年', W / 2, 470, { size: 108, weight: 900, spacing: 4, fill: GOLD_FILL, shadow: 'rgba(255,120,20,0.85)', shadowBlur: 50 });
+  txt('一束光的旅行', W / 2, 1580, { family: 'Serif', size: 124, weight: 900, spacing: 12, fill: GOLD_FILL, shadow: 'rgba(120,40,0,0.9)', shadowBlur: 50 });
+  txt('THE JOURNEY OF A PHOTON', W / 2, 1690, { family: 'Mont', size: 30, weight: 700, spacing: 14, alpha: 0.85 });
+  bloom(0.35);
+  ctx.globalAlpha = 0.6; ctx.drawImage(VIG, 0, 0); ctx.globalAlpha = 1;
+}
+window.renderCover = renderCover;
 window.renderFrame = i => renderTime(i / FPS);
 window.renderTime = renderTime;
 window.META = { W, H, FPS, DURATION, IMPACTS, EVENTS: EVENTS.map(e => e.t), WALK: WALK.map(w => w.t) };

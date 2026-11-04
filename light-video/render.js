@@ -48,6 +48,11 @@ const grab = (page, arg, byTime) => page.evaluate(([a, bt]) => {
       fs.writeFileSync(path.join(ROOT, 'preview', `t${t.toFixed(2)}.png`), Buffer.from(b64, 'base64'));
       console.log(`t=${t}  ${Date.now() - t0}ms`);
     }
+  } else if (mode === 'cover') {
+    const page = await openPage(browser, url);
+    const b64 = await page.evaluate(() => { window.renderCover(); return document.getElementById('c').toDataURL('image/png').slice(22); });
+    fs.writeFileSync(path.join(ROOT, rest[0] || 'cover.png'), Buffer.from(b64, 'base64'));
+    console.log('cover done');
   } else if (mode === 'frames') {
     const workers = Number(rest[0] || 4);
     const outDir = path.join(ROOT, 'frames');
