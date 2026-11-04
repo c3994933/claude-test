@@ -17,7 +17,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 from timeline import B, BAR, DUR, E_PEOPLE, N_STEP, P_STEP, T, T0, bt
 
-W, H, FPS = 1920, 1080, 30
+W, H, FPS = 1920, 1080, 30          # layout space (all coordinates below are in 1080p units)
+SS = int(os.environ.get("SCALE", "2"))  # output = layout x SS  (2 -> 3840x2160)
+OW, OH = W * SS, H * SS
 NFRAMES = int(round(DUR * FPS))
 FONT_DIR = os.environ.get("FONT_DIR", os.path.join(os.path.dirname(__file__), "fonts"))
 FONT_FILES = {"serif": "serif900.ttf", "serif6": "serif600.ttf", "sans": "sans500.ttf", "latin": "cinzel.ttf"}
@@ -121,7 +123,7 @@ CAM = Cam()
 
 def P(pts):
     pts = np.asarray(pts, float).reshape(-1, 2)
-    return (pts - [CAM.cx, CAM.cy]) * CAM.zoom + [W / 2 + CAM.sx, H / 2 + CAM.sy]
+    return ((pts - [CAM.cx, CAM.cy]) * CAM.zoom + [W / 2 + CAM.sx, H / 2 + CAM.sy]) * SS
 
 
 def col(c, a):
@@ -132,17 +134,17 @@ def poly(L, pts, c, a=1.0, th=2.0, closed=False, core=True):
     if pts is None or a <= 0.01 or len(pts) < 2:
         return
     p = np.round(P(pts) * 16).astype(np.int32).reshape(-1, 1, 2)
-    t = max(1, int(round(th * CAM.zoom)))
+    t = max(1, int(round(th * CAM.zoom * SS)))
     cv2.polylines(L, [p], closed, col(c, a), t, cv2.LINE_AA, shift=4)
     if core and t >= 2:
-        cv2.polylines(L, [p], closed, col(mixc(c, (255, 255, 255), 0.55), a), max(1, t // 2), cv2.LINE_AA, shift=4)
+        cv2.polylines(L, [p], closed, col(mixc(c, (255, 255, 255), 0.65), a), max(1, int(round(t * 0.5))), cv2.LINE_AA, shift=4)
 
 
 def dot(L, p, r, c, a=1.0):
     if a <= 0.01:
         return
     q = np.round(P(p)[0] * 16).astype(int)
-    cv2.circle(L, (int(q[0]), int(q[1])), max(1, int(round(r * CAM.zoom * 16))), col(c, a), -1, cv2.LINE_AA, shift=4)
+    cv2.circle(L, (int(q[0]), int(q[1])), max(1, int(round(r * CAM.zoom * 16 * SS))), col(c, a), -1, cv2.LINE_AA, shift=4)
 
 
 def line(L, p0, p1, c, a=1.0, th=1.5):
@@ -457,7 +459,7 @@ def char_tile(ch, fname, size):
 def blit(out, al, rgb, x, y, alpha, mode="over"):
     h, w = al.shape
     x, y = int(round(x)), int(round(y))
-    x0, y0, x1, y1 = max(0, x), max(0, y), min(W, x + w), min(H, y + h)
+    x0, y0, x1, y1 = max(0, x), max(0, y), min(OW, x + w), min(OH, y + h)
     if x1 <= x0 or y1 <= y0:
         return
     a = al[y0 - y:y1 - y, x0 - x:x1 - x, None] * alpha
@@ -474,6 +476,7 @@ def blit(out, al, rgb, x, y, alpha, mode="over"):
 def text_line(out, t, segs, x, y, size, fname="serif", align="c", speed=0.055, tracking=0.0,
               t_out=None, glow=0.25, rise=14):
     """segs: list of (text, rgb, t_start). Characters fade/rise in one by one."""
+    x, y, size, tracking, rise = x * SS, y * SS, int(round(size * SS)), tracking * SS, rise * SS
     chars = []
     for txt, c, ts in segs:
         for i, ch in enumerate(txt):
@@ -491,7 +494,7 @@ def text_line(out, t, segs, x, y, size, fname="serif", align="c", speed=0.055, t
             dy = (1 - ease_out(e)) * rise
             top = y - lh / 2 - pad + dy
             rgb = np.array(c, np.float32) / 255
-            blit(out, sh, None, cx - pad + 2, top + 3, 0.7 * e * fo, "shadow")
+            blit(out, sh, None, cx - pad + 2 * SS, top + 3 * SS, 0.7 * e * fo, "shadow")
             if glow:
                 blit(out, gl, rgb, cx - pad, top, glow * e * fo, "add")
             blit(out, al, rgb, cx - pad, top, e * fo)
@@ -504,16 +507,17 @@ _TAGS = {}
 def tag(out, t, letter, label, x, y, t0, t_out=None, align="c"):
     k = (letter, label)
     if k not in _TAGS:
-        fb = font("sans", 28)
-        fl = font("sans", 28)
+        fb = font("sans", 28 * SS)
+        fl = font("sans", 28 * SS)
         lw = int(fl.getlength(label))
-        w, h = 44 + 12 + lw + 4, 44
+        bx = 44 * SS
+        w, h = bx + 12 * SS + lw + 4 * SS, bx
         box = Image.new("L", (w, h), 0)
-        ImageDraw.Draw(box).rounded_rectangle((0, 0, 43, 43), 9, fill=255)
+        ImageDraw.Draw(box).rounded_rectangle((0, 0, bx - 1, bx - 1), 9 * SS, fill=255)
         let = Image.new("L", (w, h), 0)
-        ImageDraw.Draw(let).text((22, 22), letter, font=fb, fill=255, anchor="mm")
+        ImageDraw.Draw(let).text((bx // 2, bx // 2), letter, font=fb, fill=255, anchor="mm")
         lab = Image.new("L", (w, h), 0)
-        ImageDraw.Draw(lab).text((56, 22), label, font=fl, fill=255, anchor="lm")
+        ImageDraw.Draw(lab).text((bx + 12 * SS, bx // 2), label, font=fl, fill=255, anchor="lm")
         _TAGS[k] = tuple(np.asarray(im, np.float32) / 255 for im in (box, let, lab))
     box, let, lab = _TAGS[k]
     e = ease_out(seg(t, t0, t0 + 0.25))
@@ -522,8 +526,9 @@ def tag(out, t, letter, label, x, y, t0, t_out=None, align="c"):
     if a <= 0:
         return
     w = box.shape[1]
-    x0 = {"c": x - w / 2, "l": x, "r": x - w}[align] - (1 - e) * 20
-    y0 = y - 22
+    x, y = x * SS, y * SS
+    x0 = {"c": x - w / 2, "l": x, "r": x - w}[align] - (1 - e) * 20 * SS
+    y0 = y - 22 * SS
     blit(out, box, np.array(CORAL) / 255, x0, y0, a)
     blit(out, let, np.array([1, 1, 1.0]), x0, y0, a)
     blit(out, lab, np.array(CREAM) / 255, x0, y0, a * 0.9)
@@ -533,18 +538,17 @@ def tag(out, t, letter, label, x, y, t0, t_out=None, align="c"):
 
 
 def _radial(cx, cy, inner, outer, power=1.6):
-    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-    d = np.sqrt(((xx - cx) / W) ** 2 + ((yy - cy) / H) ** 2) / 0.75
+    yy, xx = np.mgrid[0:OH, 0:OW].astype(np.float32)
+    d = np.sqrt(((xx - cx * SS) / OW) ** 2 + ((yy - cy * SS) / OH) ** 2) / 0.75
     f = np.clip(d, 0, 1)[..., None] ** power
     return (np.array(inner, np.float32) * (1 - f) + np.array(outer, np.float32) * f) / 255
 
 
 BG_COLD = _radial(960, 480, (16, 22, 40), (3, 4, 10))
 BG_WARM = _radial(960, 480, (40, 16, 30), (7, 3, 8))
-_yy, _xx = np.mgrid[0:H, 0:W].astype(np.float32)
+_yy, _xx = (np.mgrid[0:OH, 0:OW].astype(np.float32) / SS)  # in layout units
 VIGNETTE = (1 - 0.55 * np.clip(np.sqrt(((_xx - W / 2) / (W * 0.62)) ** 2 + ((_yy - H / 2) / (H * 0.7)) ** 2) - 0.35, 0, 1) ** 1.5)[..., None]
 _rng = np.random.default_rng(5)
-GRAIN = [(_rng.standard_normal((H // 2, W // 2)).astype(np.float32) * 0.012) for _ in range(4)]
 STARS = np.stack([_rng.uniform(0, W, 260), _rng.uniform(0, H, 260), _rng.uniform(0, 6.28, 260),
                   _rng.uniform(0.6, 2.2, 260), _rng.uniform(0.6, 1.6, 260)], 1)
 PARTS = np.stack([_rng.uniform(-60, W + 60, 520), _rng.uniform(-40, H + 40, 520),
@@ -556,7 +560,7 @@ def draw_stars(L, t, tint, a=1.0):
         tw = 0.35 + 0.3 * math.sin(t * sp + ph)
         px = (x - (CAM.cx - 960) * 0.15) % W
         py = (y - (CAM.cy - 540) * 0.15) % H
-        cv2.circle(L, (int(px * 16), int(py * 16)), int(r * 16), col(tint, tw * a), -1, cv2.LINE_AA, shift=4)
+        cv2.circle(L, (int(px * 16 * SS), int(py * 16 * SS)), int(r * 16 * SS), col(tint, tw * a), -1, cv2.LINE_AA, shift=4)
 
 
 # ---------------------------------------------------------------- scenes
@@ -917,7 +921,7 @@ def punch(t):
 
 def render(i):
     t = i / FPS
-    L = np.zeros((H, W, 3), np.uint8)
+    L = np.zeros((OH, OW, 3), np.uint8)
     texts = []
     CAM.cx, CAM.cy, CAM.zoom = 960.0, 540.0, 1.0
     CAM.sx, CAM.sy = shake_amp(t)
@@ -932,7 +936,7 @@ def render(i):
         draw_stars(L, t, mixc(ICE, CREAM, warmth), 0.8)
         scene_intro(L, texts, t)
     elif t < T["drop"]:
-        out = np.zeros((H, W, 3), np.uint8)
+        out = np.zeros((OH, OW, 3), np.uint8)
         return out.tobytes()
     elif t < T["e"]:
         warmth = 0.7
@@ -982,8 +986,8 @@ def render(i):
     bg = BG_COLD * (1 - warmth) + BG_WARM * warmth
     Lf = L.astype(np.float32) * (1 / 255)
     sm = cv2.resize(Lf, (W // 4, H // 4), interpolation=cv2.INTER_AREA)
-    g = cv2.GaussianBlur(sm, (0, 0), 2.2) * 1.5 + cv2.GaussianBlur(sm, (0, 0), 9) * 1.9
-    g = cv2.resize(g, (W, H), interpolation=cv2.INTER_LINEAR)
+    g = cv2.GaussianBlur(sm, (0, 0), 2.2) * 1.35 + cv2.GaussianBlur(sm, (0, 0), 9) * 1.5
+    g = cv2.resize(g, (OW, OH), interpolation=cv2.INTER_LINEAR)
     out = bg + Lf + g
 
     # warm flood at the end
@@ -1003,8 +1007,6 @@ def render(i):
     # fade from / to black
     fade = seg(t, 0, 0.4) * (1 - seg(t, DUR - 0.6, DUR))
     out *= fade
-    g2 = cv2.resize(GRAIN[i % 4], (W, H), interpolation=cv2.INTER_NEAREST)
-    out += g2[..., None]
     # soft shoulder tone-map
     knee = 0.82
     hi = out > knee
@@ -1019,7 +1021,7 @@ def main():
         os.makedirs(outdir, exist_ok=True)
         for ts in sys.argv[3:]:
             i = int(round(float(ts) * FPS))
-            img = np.frombuffer(render(i), np.uint8).reshape(H, W, 3)
+            img = np.frombuffer(render(i), np.uint8).reshape(OH, OW, 3)
             Image.fromarray(img).save(os.path.join(outdir, f"t{float(ts):05.2f}.png"))
         return
     out = sys.argv[2]
@@ -1038,8 +1040,8 @@ def main():
         import audio
         audio.build(tmp_a)
     ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
-                           "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "slow",
-                           "-b:v", "4500k", "-maxrate", "6M", "-bufsize", "9M", "-pix_fmt", "yuv420p", tmp_v],
+                           "-s", f"{OW}x{OH}", "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "slow",
+                           "-crf", "16", "-tune", "animation", "-pix_fmt", "yuv420p", tmp_v],
                           stdin=subprocess.PIPE)
     with Pool(int(os.environ.get("JOBS", os.cpu_count() or 2))) as pool:
         for k, buf in enumerate(pool.imap(render, range(NFRAMES), chunksize=4)):

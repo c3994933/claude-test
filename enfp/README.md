@@ -1,8 +1,8 @@
 # ENFP · 竞选者 — 横屏卡点动画草稿
 
-1920×1080 / 30fps / **29.2 秒**，卡的是你给的参考视频（ENFJ 主人公）的背景音乐：**90 BPM**，第一拍在 0:00.15，鼓点在第 12 拍（**0:08.15**）进来。
+**4K（3840×2160）/ 30fps / 29.2 秒**，另附 1080p 版（由 4K 缩小，比直接渲 1080p 更锐），卡的是你给的参考视频（ENFJ 主人公）的背景音乐：**90 BPM**，第一拍在 0:00.15，鼓点在第 12 拍（**0:08.15**）进来。
 
-- 成片草稿：`out/ENFP_竞选者_横屏卡点_29s.mp4`
+- 成片：`out/ENFP_竞选者_4K.mp4`（发抖音 / B 站选这个）、`out/ENFP_竞选者_1080p.mp4`（手机预览 / 小文件）
 - 关键帧一览：`out/contact_sheet.jpg`
 
 ![contact sheet](out/contact_sheet.jpg)
@@ -34,6 +34,8 @@ Noto Serif SC 900 → `serif900.ttf`，Noto Serif SC 600 → `serif600.ttf`，No
 ```bash
 FONT_DIR=/path/to/fonts BGM=/path/to/music.mp3 BGM_START=0 python3 render.py video out/ENFP.mp4
 ```
+
+默认按 4K 渲染（`SCALE=2`）；`SCALE=1` 出 1080p，渲染快 4 倍，适合改动后快速预览。
 
 `BGM_START` 是音乐文件里"第 0 拍之前 0.15 秒"那个位置（从参考录屏里截取时是 1.70）。换成原版音乐时，让它的鼓点落在成片 0:08.15 即可。不传 `BGM` 时会用 `audio.py` 合成的占位节拍。
 
