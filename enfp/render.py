@@ -886,7 +886,7 @@ def scene_outro(L, out_texts, t):
     sparks(L, lambda te: c, t, o0 + 0.5, DUR, rate=40, life=(0.3, 0.8), speed=(40, 140), g=60, seed=120.0, th=1.2)
     out_texts.append(lambda o: text_line(o, t, [("ENFP", CREAM, o0 + 0.45)], 960, 580, 64, "latin", tracking=26, speed=0.08, glow=0.3))
     out_texts.append(lambda o: text_line(o, t, [("竞选者", CREAM, o0 + 0.75)], 960, 670, 60, "serif", tracking=12, speed=0.1))
-    out_texts.append(lambda o: text_line(o, t, [("MBTI 系列  ·  @你的账号", (230, 190, 180), o0 + 1.05)], 960, 745, 24, "sans",
+    out_texts.append(lambda o: text_line(o, t, [("MBTI 系列  ·  @小纸人讲道理", (230, 190, 180), o0 + 1.05)], 960, 745, 24, "sans",
                                          tracking=3, speed=0.02, glow=0.0, rise=4))
 
 
