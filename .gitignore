@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 enfp/fonts/
+*.mp4.video.mp4
+*.mp4.audio.wav
