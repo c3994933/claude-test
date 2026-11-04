@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build 选择 · Choice end to end: frames -> score -> light.mp4
+# Build 一束光的旅行 end to end: frames -> score -> light.mp4
 set -euo pipefail
 cd "$(dirname "$0")"
 rm -rf frames
