@@ -445,7 +445,7 @@ def char_tile(ch, fname, size):
     f = font(fname, size)
     asc, desc = f.getmetrics()
     adv = f.getlength(ch)
-    pad = int(size * 0.35)
+    pad = int(size * 0.9)  # room for the glow blur so it never clips into a box
     w, h = int(math.ceil(adv)) + 2 * pad, asc + desc + 2 * pad
     im = Image.new("L", (w, h), 0)
     ImageDraw.Draw(im).text((pad, pad), ch, font=f, fill=255)
