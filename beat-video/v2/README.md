@@ -14,3 +14,7 @@ python3 audio.py                            # -> mix.wav
 node render.js full video_only.mp4
 ffmpeg -i video_only.mp4 -i mix.wav -map 0:v -map 1:a -c:v copy -c:a aac -b:a 192k -ac 2 -shortest out.mp4
 ```
+
+## Cover
+
+`node cover.js` renders `cover_9x16.png` (1080×1920) and `cover_3x4.png` (1080×1440) from `cover.html`.
